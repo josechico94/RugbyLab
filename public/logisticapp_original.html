@@ -1,0 +1,2220 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>LogisticApp - BRC (Pro)</title>
+
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#030712">
+    <link rel="apple-touch-icon" href="./img/bologna_rugby_logo_192.png"> <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+        import {
+            getFirestore, collection, doc, addDoc, setDoc, deleteDoc,
+            onSnapshot, query, orderBy, serverTimestamp, getDocs
+        } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+        import {
+            getAuth, onAuthStateChanged, signInWithEmailAndPassword,
+            signOut, setPersistence, browserLocalPersistence
+        } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+        import {
+            getStorage, ref, uploadBytes, getDownloadURL
+        } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
+
+        // Config Firebase (tu proyecto)
+        const firebaseConfig = {"apiKey": "AIzaSyB_9OlPqcZ78v9NDJAlr9FxNvYcmgjbyJE", "authDomain": "brc-logistica-famiglie.firebaseapp.com", "projectId": "brc-logistica-famiglie", "storageBucket": "brc-logistica-famiglie.firebasestorage.app", "messagingSenderId": "1097198392202", "appId": "1:1097198392202:web:90ebc7279ab8fd1c7aae73", "measurementId": "G-L88QJ4N0PC"};
+
+        // Emails autorizzati ad inserire punti
+        const ALLOWED_EMAILS = ["admin@gmail.com", "aless.pagnini@gmail.com","admin@brc.com", "andreafava03@gmail.com","salvicristiano@libero.it","admin.brc@gmail.com", "bottesilvio@hotmail.com", "nicco.rega@gmail.com", "joseichico94@gmail.com"];
+
+        // Inizializza Firebase
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+        const storage = getStorage(app);
+        setPersistence(auth, browserLocalPersistence);
+
+        // Esponi per React (Babel)
+        window._fb = {
+            db, collection, doc, addDoc, setDoc, deleteDoc, onSnapshot, query, orderBy, serverTimestamp, getDocs,
+            auth, onAuthStateChanged, signInWithEmailAndPassword, signOut, ALLOWED_EMAILS,
+            storage, ref, uploadBytes, getDownloadURL
+        };
+    </script>
+</head>
+<body class="bg-gray-950">
+    <div id="root"></div>
+
+    <script type="text/babel">
+    // ======== HOOKS E LIBRERIE ========
+    const { useEffect, useMemo, useState, useRef } = React;
+    const {
+        db, collection, doc, addDoc, setDoc, deleteDoc, onSnapshot, query, orderBy, serverTimestamp, getDocs,
+        auth, onAuthStateChanged, signInWithEmailAndPassword, signOut, ALLOWED_EMAILS,
+        storage, ref, uploadBytes, getDownloadURL
+    } = window._fb;
+    const { Chart } = window;
+
+    // ======== DATI STATICI (SOLO SQUADRE) ========
+    const TEAM_LIST = [
+        { id: "ISOLANI",   name: "ISOLANI", color: "#3b82f6" }, // Blu
+        { id: "ALBERGATI", name: "ALBERGATI", color: "#16a34a" }, // Verde
+        { id: "CASALI",    name: "CASALI", color: "#eab308" }, // Giallo
+        { id: "MAGNANI",   name: "MAGNANI", color: "#dc2626" }, // Rosso
+    ];
+    
+    // GLI EVENTI SONO ORA CARICATI DA FIRESTORE (vedi App)
+
+    function slugify(str) { return (str||"").normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-zA-Z0-9]+/g,'_').replace(/^_|_$/g,'').toUpperCase(); }
+
+    // ======== COMPONENTE PRINCIPALE: App ========
+    function App() {
+        const [user, setUser] = useState(null);
+        const isAllowed = user?.email && ALLOWED_EMAILS.includes(user.email);
+
+        // ======== STATI DINAMICI DA FIRESTORE ========
+        const [players, setPlayers] = useState([]);
+        const [tx, setTx] = useState([]);
+        const [events, setEvents] = useState([]);
+        const [loading, setLoading] = useState(true);
+
+        const playerInputRef = React.useRef(null);
+        const [selectedPlayerIds, setSelectedPlayerIds] = useState([]);
+        const [form, setForm] = useState({ teamId: "", eventId: "", note: "", quantity: 1 });
+        
+        const [playerQuery, setPlayerQuery] = useState("");
+        const [showList, setShowList] = useState(false);
+
+        const [filterTeam, setFilterTeam] = useState("");
+        const [filterEvent, setFilterEvent] = useState("");
+        const [dateFrom, setDateFrom] = useState("");
+        const [dateTo, setDateTo] = useState("");
+        
+        // ======== NUEVO: Estado para búsqueda en historial ========
+        const [historySearch, setHistorySearch] = useState("");
+        // ========================================================
+
+        const [createOpen, setCreateOpen] = useState(false);
+        const [createPlayer, setCreatePlayer] = useState({ name: "", teamId: "" });
+
+        const [activeTab, setActiveTab] = useState("dashboard");
+        const [showLoginModal, setShowLoginModal] = useState(false);
+        
+        const [profilePlayerId, setProfilePlayerId] = useState(null);
+
+        // ======== EFFETTI (CARICAMENTO DATI) ========
+        useEffect(() => onAuthStateChanged(auth, (u)=>setUser(u||null)), []);
+
+        useEffect(() => {
+            setLoading(true);
+            const qPlayers = query(collection(db,"players"), orderBy("name"));
+            const qTx = query(collection(db,"tx"), orderBy("ts","desc"));
+            const qEvents = query(collection(db, "events_config"), orderBy("name"));
+
+            const unsubPlayers = onSnapshot(qPlayers, snap => setPlayers(snap.docs.map(d=>({ fid:d.id, ...d.data() }))));
+            const unsubTx = onSnapshot(qTx, snap => setTx(snap.docs.map(d=>({ fid:d.id, ...d.data() }))));
+            
+            const unsubEvents = onSnapshot(qEvents, snap => {
+                const eventsData = snap.docs.map(d=>({ fid:d.id, ...d.data() }));
+                setEvents(eventsData);
+                setLoading(false);
+            }, (err) => {
+                console.error("Errore caricamento eventi: ", err);
+                alert("ERRORE: Impossibile caricare la configurazione degli eventi da Firestore. Controlla la collection 'events_config'.");
+                setLoading(false);
+            });
+            
+            return () => { unsubPlayers(); unsubTx(); unsubEvents(); };
+        }, []);
+
+        // ======== MEMOS (CALCOLI) ========
+        const selectedPlayers = useMemo(() => players.filter(p => selectedPlayerIds.includes(p.id)), [selectedPlayerIds, players]);
+        const filteredPlayers = useMemo(()=> {
+            const q = playerQuery.trim().toLowerCase();
+            return q ? players.filter(p=>p.name?.toLowerCase().includes(q)) : players;
+        }, [playerQuery, players]);
+
+        const pointsMap = useMemo(()=> {
+            const m = Object.fromEntries(TEAM_LIST.map(t=>[t.id,0]));
+            for (const t1 of tx) if (m[t1.teamId]!==undefined) m[t1.teamId]+=Number(t1.delta)||0;
+            return m;
+        }, [tx]);
+
+        const standings = useMemo(()=>([...TEAM_LIST].map(t=>({...t, points: pointsMap[t.id]||0})).sort((a,b)=>b.points-a.points||a.name.localeCompare(b.name))), [pointsMap]);
+
+        // ======== NUEVO: Lógica de filtrado de historial mejorada ========
+        // 1. Mapea las transacciones con nombres para poder buscarlas
+        const allTxWithNames = useMemo(() => {
+            return tx.map(item => {
+                const playerName = players.find(p => p.id === item.playerId)?.name || "";
+                const eventName = events.find(e => e.id === item.eventId)?.name || "";
+                const note = item.note || "";
+                return { ...item, playerName, eventName, note };
+            });
+        }, [tx, players, events]);
+
+        // 2. Filtra el array pre-mapeado
+        const filteredTx = useMemo(()=> {
+            const start = dateFrom ? new Date(dateFrom+'T00:00:00').getTime() : -Infinity;
+            const end = dateTo ? new Date(dateTo+'T23:59:59').getTime() : Infinity;
+            const q = historySearch.toLowerCase().trim();
+
+            return allTxWithNames.filter(x=> {
+                const t = x.ts?.toMillis ? x.ts.toMillis() : (typeof x.ts==='number'?x.ts:0);
+                
+                const dateMatch = t >= start && t <= end;
+                const teamMatch = !filterTeam || x.teamId === filterTeam;
+                const eventMatch = !filterEvent || x.eventId === filterEvent;
+
+                // Nueva condición de búsqueda
+                const searchMatch = !q ||
+                    x.playerName.toLowerCase().includes(q) ||
+                    x.eventName.toLowerCase().includes(q) ||
+                    x.note.toLowerCase().includes(q);
+
+                return dateMatch && teamMatch && eventMatch && searchMatch;
+            });
+        }, [allTxWithNames, filterTeam, filterEvent, dateFrom, dateTo, historySearch]);
+        // ================================================================
+
+        // Memos per il form
+        const EVENTS_WITH_QUANTITY = useMemo(() => events.filter(e => e.allowQuantity).map(e => e.id), [events]);
+        const selectedEvent = events.find(e => e.id === form.eventId);
+        const eventPoints = selectedEvent ? selectedEvent.points : 0;
+        
+        const quantityValue = parseInt(form.quantity, 10);
+        const showQuantityInput = EVENTS_WITH_QUANTITY.includes(form.eventId);
+        const finalDelta = eventPoints * (showQuantityInput ? (quantityValue > 0 ? quantityValue : 1) : 1);
+        
+        const isPlayerSelectionActive = selectedPlayerIds.length > 0;
+        
+        // ======== FUNZIONI HANDLER ========
+        async function doLogin(e) {
+            e.preventDefault();
+            const email = e.target.email.value.trim();
+            const password = e.target.password.value;
+            try {
+                await signInWithEmailAndPassword(auth, email, password);
+                setShowLoginModal(false);
+            }
+            catch(err) { alert("Login fallito: " + err.message); }
+        }
+        function doLogout() { signOut(auth); }
+        
+        function clearPlayerSelection() {
+            setSelectedPlayerIds([]);
+            setPlayerQuery("");
+            playerInputRef.current?.focus();
+        }
+
+        async function addMovement() {
+            if (!isAllowed) return alert("Non hai i permessi per scrivere.");
+            if (!form.eventId) return alert("Seleziona un evento.");
+            if (isPlayerSelectionActive && !selectedPlayerIds.length) return alert("Seleziona almeno un giocatore.");
+            if (!isPlayerSelectionActive && !form.teamId) return alert("Seleziona una squadra per un movimento senza giocatore.");
+            if (!form.note) return alert("Aggiungi una nota.");
+
+            const quantity = showQuantityInput ? (parseInt(form.quantity, 10) || 1) : 1;
+            if (showQuantityInput && (quantity <= 0 || !Number.isInteger(quantity))) return alert("La quantità deve essere un numero intero positivo.");
+            
+            const delta = finalDelta;
+            const note = (form.note||"").trim();
+            let transactionsCount = 0;
+            
+            try {
+                if (isPlayerSelectionActive) {
+                    const promises = selectedPlayers.map(player => {
+                        transactionsCount++;
+                        return addDoc(collection(db,"tx"), {
+                            teamId: player.teamId, 
+                            playerId: player.id,
+                            eventId: form.eventId,
+                            delta,
+                            note,
+                            quantity,
+                            ts: serverTimestamp(),
+                            createdBy: user?.email || null,
+                        });
+                    });
+                    await Promise.all(promises);
+                } else {
+                    transactionsCount = 1;
+                    await addDoc(collection(db,"tx"), {
+                        teamId: form.teamId,
+                        playerId: null,
+                        eventId: form.eventId,
+                        delta,
+                        note,
+                        quantity,
+                        ts: serverTimestamp(),
+                        createdBy: user?.email || null,
+                    });
+                }
+                
+                setForm(f => ({ ...f, eventId: "", note: "", quantity: 1 })); 
+                setSelectedPlayerIds([]);
+                setPlayerQuery("");
+                alert(`Movimenti aggiunti con successo! Creadas ${transactionsCount} transacciones.`);
+                playerInputRef.current?.focus();
+                
+                // NUEVO: Al guardar, vuelve al Dashboard
+                setActiveTab('dashboard'); 
+                
+            } catch (error) {
+                console.error("Errore nell'aggiunta dei movimenti:", error);
+                alert("Errore nell'aggiunta dei movimenti: " + error.message);
+            }
+        }
+
+        async function createNewPlayer() {
+            if (!isAllowed) return alert("Non hai i permessi per scrivere.");
+            const name = createPlayer.name?.trim(); const teamId = createPlayer.teamId;
+            if (!name) return alert("Scrivi un nome."); if (!teamId) return alert("Seleziona una squadra.");
+            
+            const fid = slugify(name) || (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()));
+            await setDoc(doc(collection(db,"players"), fid), {
+                id: fid, name, teamId,
+                fantasyPosition: createPlayer.fantasyPosition || "",
+                role: createPlayer.role || "",
+                photoUrl: createPlayer.photoUrl || "",
+                number: createPlayer.number || "",
+                nationality: createPlayer.nationality || "",
+                bio: createPlayer.bio || "",
+            });
+            setCreateOpen(false); 
+            setSelectedPlayerIds(ids => [...ids, fid]);
+            if (selectedPlayerIds.length === 0) setForm(f=>({ ...f, teamId }));
+            playerInputRef.current?.focus();
+        }
+
+        async function removeMovement(fid) {
+            if (!isAllowed) return alert("Non hai i permessi per scrivere.");
+            if (!confirm("Eliminare questo movimento?")) return;
+            await deleteDoc(doc(db,"tx",fid));
+        }
+
+        function togglePlayerSelection(playerId) {
+            setSelectedPlayerIds(ids => {
+                const newIds = ids.includes(playerId)
+                    ? ids.filter(id => id !== playerId)
+                    : [...ids, playerId];
+                return newIds;
+            });
+            playerInputRef.current?.focus(); 
+        }
+
+        function handleShowProfile(playerId) {
+            setProfilePlayerId(playerId);
+        }
+
+        // --- PANTALLA DE CARGA ---
+        if (loading) {
+            return (
+                <div className="min-h-screen bg-gray-950 text-gray-100 flex flex-col items-center justify-center p-4">
+                    <img
+                        src="./img/bologna_rugby_logo.png"
+                        alt="Caricamento LogisticApp..."
+                        className="w-32 h-32 mb-4 animate-pulse"
+                    />
+                    <h1 className="text-xl font-bold">Caricamento LogisticApp...</h1>
+                </div>
+            );
+        }
+        // --- FIN PANTALLA DE CARGA ---
+
+        return (
+            <div className="min-h-screen bg-gray-950 text-gray-100 flex flex-col">
+                <header className="flex items-center justify-between p-4 bg-gray-900 border-b border-gray-800">
+                    <h1 className="text-xl font-bold">LogisticApp - BRC 🏉</h1>
+                    <div className="flex items-center gap-2">
+                        {user ? (
+                            <div className="flex items-center gap-2">
+                                <span className={"text-xs px-2 py-1 rounded " + (isAllowed ? "bg-emerald-700":"bg-gray-700")}>
+                                    {isAllowed ? "Scrittura abilitata":"Sola lettura"}
+                                </span>
+                                <button onClick={doLogout} className="text-sm px-3 py-1 rounded-lg bg-gray-800 hover:bg-gray-700">Esci</button>
+                            </div>
+                        ) : (
+                            <button onClick={() => setShowLoginModal(true)} className="text-sm px-3 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500">Accedi</button>
+                        )}
+                    </div>
+                </header>
+
+                <main className="flex-grow p-4 overflow-y-auto pb-20">
+                    
+                    {/* ======== TAB: ADD PUNTI (Ahora se muestra condicionalmente) ======== */}
+                    {/* Esta sección ahora es más como un modal/página temporal */}
+                    {activeTab === "addPoints" && (
+                        <section className={"rounded-2xl p-4 shadow " + (isAllowed ? "bg-gray-900":"bg-gray-900/60")}>
+                            <div className="flex items-center justify-between mb-3">
+                                <h2 className="text-lg font-semibold">Aggiungi punti per evento</h2>
+                                {/* Botón para cerrar y volver al dashboard */}
+                                <button onClick={() => setActiveTab('dashboard')} className="text-gray-400 hover:text-white">&times;</button>
+                            </div>
+                            {!isAllowed && <span className="text-xs text-amber-400 mb-4 block">Effettua l'accesso con un'email autorizzata per aggiungere/modificare</span>}
+
+                            <div className="grid grid-cols-1 gap-4 items-start">
+                                
+                                {/* 1. Campo Selezione Giocatore/i */}
+                                <div> 
+                                    <label className="text-sm text-gray-400">Giocatore/i (opzionale)</label>
+                                    <input
+                                        ref={playerInputRef} 
+                                        value={playerQuery}
+                                        onChange={e => { setPlayerQuery(e.target.value); setShowList(true); }}
+                                        onFocus={() => setShowList(true)}
+                                        onBlur={() => setTimeout(() => setShowList(false), 200)}
+                                        placeholder="Scrivi per cercare e selezionare..."
+                                        className="w-full mt-1 px-3 py-2 rounded-xl bg-gray-800"
+                                        disabled={!isAllowed}
+                                    />
+                                    {selectedPlayers.length > 0 && (
+                                        <div className="flex flex-wrap gap-1 mt-2 p-1 border border-indigo-500 rounded-lg bg-gray-800 items-center">
+                                            {selectedPlayers.map(p => (
+                                                <div key={p.id} className="flex items-center bg-indigo-700/50 text-xs px-2 py-1 rounded-full">
+                                                    <span>{p.name}</span>
+                                                    <button type="button" onClick={() => togglePlayerSelection(p.id)} className="ml-1 text-gray-200 hover:text-white">&times;</button>
+                                                </div>
+                                            ))}
+                                            <button type="button" onClick={clearPlayerSelection} className="text-xs px-2 py-1 rounded-full bg-red-700/50 text-white hover:bg-red-600/70 ml-auto transition-colors">Limpiar</button>
+                                        </div>
+                                    )}
+
+                                    {showList && isAllowed && (
+                                        <div className="mt-1 w-full max-h-60 overflow-auto bg-gray-900 border border-gray-800 rounded-xl">
+                                            {filteredPlayers.length === 0 ? (
+                                                <div className="px-3 py-2 text-gray-400">Nessun risultato</div>
+                                            ) : filteredPlayers.map(p => {
+                                                const isSelected = selectedPlayerIds.includes(p.id);
+                                                return (
+                                                    <button type="button" key={p.fid} onMouseDown={(e) => { e.preventDefault(); togglePlayerSelection(p.id); }} 
+                                                        className={"w-full text-left px-3 py-2 border-b border-gray-800 flex items-center justify-between " + (isSelected ? "bg-indigo-700/30 hover:bg-indigo-700/50" : "hover:bg-gray-800")}>
+                                                        <span>{p.name}</span>
+                                                        <span className="text-xs px-2 py-0.5 rounded bg-gray-800">{TEAM_LIST.find(t=>t.id===p.teamId)?.name}</span>
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                    <div className="mt-1 text-xs text-gray-500">
+                                        Non c'è? <button disabled={!isAllowed} onClick={()=> { setCreateOpen(true); setCreatePlayer({ name: playerQuery.trim(), teamId: form.teamId || "" }); }} className={"underline " + (!isAllowed ? "opacity-50 cursor-not-allowed":"")}>Crea giocatore</button>
+                                    </div>
+                                </div>
+
+                                {/* 2. Campo Squadra */}
+                                <div>
+                                    <label className="text-sm text-gray-400">Squadra {!isPlayerSelectionActive && "(obbligatorio)"}</label>
+                                    <select value={form.teamId} onChange={e=>setForm(f=>({ ...f, teamId:e.target.value }))} className={"w-full mt-1 px-3 py-2 rounded-xl bg-gray-800"} disabled={!isAllowed}>
+                                        <option value="">— Seleziona —</option>
+                                        {TEAM_LIST.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                                    </select>
+                                    {isPlayerSelectionActive && <p className="text-xs text-gray-500 mt-1">La squadra è rilevata dal giocatore.</p>}
+                                </div>
+
+                                {/* 3. Campo Evento (ora da DB) */}
+                                <div>
+                                    <label className="text-sm text-gray-400">Evento</label>
+                                    <select value={form.eventId} onChange={e=>{ 
+                                            const evId=e.target.value; 
+                                            const ev=events.find(x=>x.id===evId); 
+                                            setForm(f=>({ ...f, eventId:evId, note: ev? ev.name : f.note, quantity: 1 })); 
+                                        }} className="w-full mt-1 px-3 py-2 rounded-xl bg-gray-800" disabled={!isAllowed}>
+                                        <option value="">— Seleziona —</option>
+                                        {events.map(ev => <option key={ev.id} value={ev.id}>{ev.name} ({ev.points>0?"+":""}{ev.points})</option>)}
+                                    </select>
+                                </div>
+                                
+                                {/* 4. Campo Quantità (Corretto) */}
+                                {showQuantityInput && (
+                                    <div>
+                                        <label className="text-sm text-gray-400">Quantità (N. di eventi)</label>
+                                        <input type="number" min="1" step="1" value={form.quantity}
+                                            onChange={e => setForm(f => ({ ...f, quantity: e.target.value }))} 
+                                            className="w-full mt-1 px-3 py-2 rounded-xl bg-gray-800" disabled={!isAllowed}
+                                        />
+                                    </div>
+                                )}
+                                {/* 5. Campo Punti */}
+                                <div>
+                                    <label className="text-sm text-gray-400">Punti Totali per Giocatore</label>
+                                    <input value={finalDelta} readOnly disabled className="w-full mt-1 px-3 py-2 rounded-xl bg-gray-800 opacity-70 cursor-not-allowed" />
+                                </div>
+                                {/* 6. Campo Nota */}
+                                <div>
+                                    <label className="text-sm text-gray-400">Nota (modificabile)</label>
+                                    <input value={form.note} onChange={e=>setForm(f=>({ ...f, note:e.target.value }))} placeholder="Descrivi il motivo" className="w-full mt-1 px-3 py-2 rounded-xl bg-gray-800" disabled={!isAllowed} />
+                                </div>
+
+                                <div className="flex justify-end">
+                                    <button onClick={addMovement} disabled={!isAllowed || !form.eventId || (!isPlayerSelectionActive && !form.teamId)} 
+                                        className={"px-4 py-2 rounded-xl font-medium " + (isAllowed && form.eventId && (isPlayerSelectionActive || form.teamId) ? "bg-emerald-600 hover:bg-emerald-500":"bg-gray-700 cursor-not-allowed")}>
+                                        Salva movimento{selectedPlayerIds.length > 1 ? ` (${selectedPlayerIds.length} giocatori)` : ''}
+                                    </button>
+                                </div>
+                            </div>
+                        </section>
+                    )}
+                    
+                    {/* ======== TAB: STORICO (Con búsqueda) ======== */}
+                    {activeTab === "history" && (
+                        <section className="bg-gray-900 rounded-2xl p-4 shadow">
+                            <h2 className="text-lg font-semibold mb-3">Storico Movimenti</h2>
+                            <div className="flex flex-col gap-2 mb-4 text-sm">
+                                
+                                {/* ======== NUEVO: Campo de Búsqueda ======== */}
+                                <div className="flex flex-col">
+                                    <span className="text-gray-400">Cerca (Nome, Evento, Nota):</span>
+                                    <input 
+                                        type="text" 
+                                        value={historySearch} 
+                                        onChange={e => setHistorySearch(e.target.value)}
+                                        placeholder="Cerca..."
+                                        className="px-3 py-2 rounded-xl bg-gray-800"
+                                    />
+                                </div>
+                                {/* ========================================== */}
+
+                                <div className="flex flex-col">
+                                    <span className="text-gray-400">Squadra:</span>
+                                    <select value={filterTeam} onChange={e=>setFilterTeam(e.target.value)} className="px-3 py-2 rounded-xl bg-gray-800">
+                                        <option value="">Tutte</option>
+                                        {TEAM_LIST.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                                    </select>
+                                </div>
+                                <div className="flex flex-col">
+                                    <span className="text-gray-400">Evento:</span>
+                                    <select value={filterEvent} onChange={e=>setFilterEvent(e.target.value)} className="px-3 py-2 rounded-xl bg-gray-800">
+                                        <option value="">Tutti</option>
+                                        {events.map(ev => <option key={ev.id} value={ev.id}>{ev.name}</option>)}
+                                    </select>
+                                </div>
+                                <div className="flex flex-col">
+                                    <span className="text-gray-400">Da:</span>
+                                    <input type="date" value={dateFrom} onChange={e=>setDateFrom(e.target.value)} className="px-3 py-2 rounded-xl bg-gray-800"/>
+                                </div>
+                                <div className="flex flex-col">
+                                    <span className="text-gray-400">A:</span>
+                                    <input type="date" value={dateTo} onChange={e=>setDateTo(e.target.value)} className="px-3 py-2 rounded-xl bg-gray-800"/>
+                                </div>
+                                {(dateFrom||dateTo||filterTeam||filterEvent||historySearch) && (
+                                    <button onClick={()=>{ setFilterTeam(""); setFilterEvent(""); setDateFrom(""); setDateTo(""); setHistorySearch(""); }} className="px-3 py-2 mt-2 bg-gray-800 rounded-xl hover:bg-gray-700">Pulisci Filtri</button>
+                                )}
+                            </div>
+
+                            <div className="overflow-x-auto rounded-xl border border-gray-800">
+                                <table className="min-w-full text-sm">
+                                    <thead className="bg-gray-800">
+                                        <tr className="text-left text-gray-300">
+                                            <th className="px-3 py-2">Squadra</th>
+                                            <th className="px-3 py-2">Giocatore</th>
+                                            <th className="px-3 py-2">Evento</th>
+                                            <th className="px-3 py-2">Q.tà</th>
+                                            <th className="px-3 py-2">Δ Punti</th>
+                                            <th className="px-3 py-2">Data</th>
+                                            <th className="px-3 py-2"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {filteredTx.length===0 ? (
+                                            <tr><td className="px-3 py-3 text-gray-400" colSpan={7}>Nessun movimento.</td></tr>
+                                        ) : filteredTx.map(item => {
+                                            // La tabla ahora usa los nombres pre-calculados
+                                            const teamName = TEAM_LIST.find(t=>t.id===item.teamId)?.name || item.teamId;
+                                            const stamp = item.ts?.toDate ? item.ts.toDate().toLocaleString() : "-";
+                                            return (
+                                                <tr key={item.fid} className="border-t border-gray-800">
+                                                    <td className="px-3 py-2">{teamName}</td>
+                                                    <td className="px-3 py-2">{item.playerName || "-"}</td>
+                                                    <td className="px-3 py-2">{item.eventName || "-"}</td>
+                                                    <td className="px-3 py-2">{item.quantity || 1}</td>
+                                                    <td className={"px-3 py-2 " + (item.delta>=0 ? "text-emerald-400":"text-red-400")}>{item.delta>=0?"+":""}{item.delta}</td>
+                                                    <td className="px-3 py-2 whitespace-nowrap">{stamp}</td>
+                                                    <td className="px-3 py-2 text-right">
+                                                        <button onClick={()=> removeMovement(item.fid)} disabled={!isAllowed} className={"text-sm px-2 py-1 rounded-lg " + (isAllowed ? "bg-gray-700 hover:bg-gray-600":"bg-gray-800 opacity-50 cursor-not-allowed")}>X</button>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </section>
+                    )}
+
+                    {/* ======== TAB: DASHBOARD ======== */}
+                    {activeTab === "dashboard" && (
+                        <DashboardPro
+                            standings={standings}
+                            players={players}
+                            tx={tx}
+                            events={events}
+                            onShowProfile={handleShowProfile}
+                        />
+                    )}
+
+                    {/* ======== TAB: ADMIN ======== */}
+                    {activeTab === "admin" && isAllowed && (
+                        <AdminPanel
+                            players={players}
+                            events={events}
+                            db={db}
+                            collection={collection}
+                            doc={doc}
+                            setDoc={setDoc}
+                            deleteDoc={deleteDoc}
+                            addDoc={addDoc}
+                            slugify={slugify}
+                        />
+                    )}
+
+                    {/* ======== TAB: FANTASY ======== */}
+                    {activeTab === "fantasy" && (
+                        <FantasyModule players={players} tx={tx} user={user} db={db} collection={collection} doc={doc} setDoc={setDoc} getDocs={getDocs} onSnapshot={onSnapshot} query={query} orderBy={orderBy} />
+                    )}
+                </main>
+
+                {/* ======== NUEVO: Botón Flotante (FAB) para Añadir Puntos ======== */}
+                {isAllowed && activeTab !== 'addPoints' && (
+                    <button 
+                        onClick={() => setActiveTab('addPoints')} 
+                        className="fixed bottom-24 right-6 bg-emerald-600 hover:bg-emerald-500 text-white rounded-full p-4 shadow-lg z-20 transition-transform hover:scale-110"
+                        aria-label="Aggiungi Punti"
+                    >
+                        {/* Icono + */}
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                        </svg>
+                    </button>
+                )}
+                {/* ================================================================ */}
+
+                {/* ======== NAVIGAZIONE FOOTER (MODIFICADA) ======== */}
+                <footer className="fixed bottom-0 left-0 right-0 bg-gray-900 border-t border-gray-800 flex justify-around p-2 shadow-lg z-20">
+                    <TabButton icon="dashboard" label="Dashboard" activeTab={activeTab} onClick={() => setActiveTab("dashboard")} />
+                    {/* El botón "Punti" se ha movido al FAB */}
+                    <TabButton icon="history" label="Storico" activeTab={activeTab} onClick={() => setActiveTab("history")} />
+                    <TabButton icon="fantasy" label="Fantasy" activeTab={activeTab} onClick={() => setActiveTab("fantasy")} />
+                    {isAllowed && (
+                        <TabButton icon="admin" label="Admin" activeTab={activeTab} onClick={() => setActiveTab("admin")} />
+                    )}
+                </footer>
+
+                {/* ======== MODALI ======== */}
+                {createOpen && (
+                    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-30">
+                        <div className="bg-gray-900 rounded-2xl max-w-sm w-full p-4 space-y-3 border border-gray-800 max-h-[90vh] overflow-y-auto">
+                            <h3 className="text-lg font-semibold">Crea nuovo giocatore</h3>
+
+                            {/* Upload foto con crop */}
+                            <PhotoCropUploader
+                                value={createPlayer.photoUrl || ""}
+                                onChange={url => setCreatePlayer(p => ({ ...p, photoUrl: url }))}
+                            />
+
+                            {/* Nome */}
+                            <input value={createPlayer.name} onChange={e=>setCreatePlayer(p=>({ ...p, name:e.target.value }))} placeholder="Nome e cognome *" className="w-full bg-gray-800 rounded-xl p-3 outline-none" />
+
+                            {/* Squadra */}
+                            <select value={createPlayer.teamId} onChange={e=>setCreatePlayer(p=>({ ...p, teamId:e.target.value }))} className="w-full bg-gray-800 rounded-xl p-3">
+                                <option value="">— Squadra — *</option>
+                                {TEAM_LIST.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                            </select>
+
+                            {/* Posizione Fantasy */}
+                            <div>
+                                <label className="text-xs text-gray-400 font-semibold">🏉 Posizione Fantasy *</label>
+                                <select
+                                    value={createPlayer.fantasyPosition || ""}
+                                    onChange={e => setCreatePlayer(p => ({ ...p, fantasyPosition: e.target.value }))}
+                                    className={`w-full mt-1 rounded-xl px-3 py-2.5 text-sm font-medium border ${createPlayer.fantasyPosition ? "bg-emerald-900/40 border-emerald-600 text-emerald-300" : "bg-gray-800 border-gray-700 text-gray-400"}`}
+                                >
+                                    <option value="">— Seleziona posizione —</option>
+                                    {["Prima linea","Seconda linea","Terza linea","Mediani","Centri","Trequarti"].map(group => (
+                                        <optgroup key={group} label={group}>
+                                            {FANTASY_POSITIONS.filter(fp => fp.group === group).map(fp => (
+                                                <option key={fp.key} value={fp.key}>#{fp.short} – {fp.label}</option>
+                                            ))}
+                                        </optgroup>
+                                    ))}
+                                </select>
+                            </div>
+
+                            {/* Ruolo/i – bottoni toggle */}
+                            <div>
+                                <label className="text-xs text-gray-400">Ruolo/i</label>
+                                <div className="flex flex-wrap gap-1.5 mt-1">
+                                    {["Pilone sinistro","Tallonatore","Pilone destro","Seconda linea","Flanker","Numero 8","Mediano di mischia","Mediano d'apertura","Centro","Ala","Estremo","Terza linea centro","Terza linea"].map(role => {
+                                        const cur = (createPlayer.role||"").split(",").map(r=>r.trim()).filter(Boolean);
+                                        const active = cur.includes(role);
+                                        return (
+                                            <button key={role} type="button"
+                                                onClick={() => {
+                                                    const next = active ? cur.filter(r=>r!==role) : [...cur, role];
+                                                    setCreatePlayer(p => ({ ...p, role: next.join(", ") }));
+                                                }}
+                                                className={`text-xs px-2 py-1 rounded-lg border transition-all ${active ? "bg-emerald-600 border-emerald-500 text-white" : "bg-gray-700 border-gray-600 text-gray-300 hover:border-gray-400"}`}
+                                            >{role}</button>
+                                        );
+                                    })}
+                                </div>
+                                {createPlayer.role && <p className="text-xs text-emerald-400 mt-1">{createPlayer.role}</p>}
+                            </div>
+
+                            {/* Numero maglia + Nazionalità */}
+                            <div className="grid grid-cols-2 gap-2">
+                                <input
+                                    type="number" min="1" max="99"
+                                    value={createPlayer.number || ""}
+                                    onChange={e => setCreatePlayer(p => ({ ...p, number: e.target.value }))}
+                                    placeholder="N° Maglia"
+                                    className="bg-gray-800 rounded-xl px-3 py-2 text-sm outline-none"
+                                />
+                                <input
+                                    value={createPlayer.nationality || ""}
+                                    onChange={e => setCreatePlayer(p => ({ ...p, nationality: e.target.value }))}
+                                    placeholder="Nazionalità"
+                                    className="bg-gray-800 rounded-xl px-3 py-2 text-sm outline-none"
+                                />
+                            </div>
+
+                            {/* Bio */}
+                            <textarea
+                                value={createPlayer.bio || ""}
+                                onChange={e => setCreatePlayer(p => ({ ...p, bio: e.target.value }))}
+                                rows={2}
+                                placeholder="Bio breve (opzionale)"
+                                className="w-full bg-gray-800 rounded-xl px-3 py-2 text-sm outline-none resize-none"
+                            />
+
+                            <div className="flex justify-end gap-2 pt-1">
+                                <button onClick={()=> setCreateOpen(false)} className="px-3 py-2 rounded-xl bg-gray-800 hover:bg-gray-700">Annulla</button>
+                                <button onClick={createNewPlayer} className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500">Crea</button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+                
+                {profilePlayerId && (
+                    <PlayerProfileModal
+                        playerId={profilePlayerId}
+                        players={players}
+                        tx={tx}
+                        events={events}
+                        onClose={() => setProfilePlayerId(null)}
+                    />
+                )}
+
+                {showLoginModal && (
+                    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-40">
+                        <LoginForm onSubmit={doLogin} onCancel={() => setShowLoginModal(false)} />
+                    </div>
+                )}
+            </div>
+        );
+    }
+    
+    // ======== COMPONENTI SATELLITE ========
+
+    // --- Componente upload foto con crop automatico ---
+    function PhotoCropUploader({ value, onChange }) {
+        const fileInputRef = useRef(null);
+        const canvasRef = useRef(null);
+        const [dragging, setDragging] = useState(false);
+        const [uploading, setUploading] = useState(false);
+        const [uploadError, setUploadError] = useState("");
+
+        // Ritaglia e ridimensiona l'immagine in un canvas 300x300 (quadrato centrato)
+        function cropAndResizeImage(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        const SIZE = 300;
+                        const canvas = document.createElement('canvas');
+                        canvas.width = SIZE;
+                        canvas.height = SIZE;
+                        const ctx = canvas.getContext('2d');
+
+                        // Calcola il crop centrato (ritaglia al quadrato)
+                        const side = Math.min(img.width, img.height);
+                        const sx = (img.width - side) / 2;
+                        const sy = (img.height - side) / 2;
+
+                        // Sfondo bianco per immagini con trasparenza
+                        ctx.fillStyle = '#1f2937';
+                        ctx.fillRect(0, 0, SIZE, SIZE);
+                        ctx.drawImage(img, sx, sy, side, side, 0, 0, SIZE, SIZE);
+
+                        canvas.toBlob(resolve, 'image/jpeg', 0.88);
+                    };
+                    img.onerror = reject;
+                    img.src = e.target.result;
+                };
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+        }
+
+        async function handleFile(file) {
+            if (!file || !file.type.startsWith('image/')) {
+                setUploadError("Seleziona un file immagine (JPG, PNG, WebP).");
+                return;
+            }
+            setUploadError("");
+            setUploading(true);
+            try {
+                const blob = await cropAndResizeImage(file);
+
+                // Prova Firebase Storage
+                try {
+                    const storageRef = ref(storage, `players/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.]/g,'_')}`);
+                    await uploadBytes(storageRef, blob, { contentType: 'image/jpeg' });
+                    const url = await getDownloadURL(storageRef);
+                    onChange(url);
+                } catch (storageErr) {
+                    // Fallback: base64 (se Storage non è abilitato)
+                    const reader = new FileReader();
+                    reader.onload = (e) => onChange(e.target.result);
+                    reader.readAsDataURL(blob);
+                }
+            } catch (err) {
+                setUploadError("Errore nell'elaborazione dell'immagine.");
+                console.error(err);
+            }
+            setUploading(false);
+        }
+
+        function onFileInputChange(e) {
+            if (e.target.files?.[0]) handleFile(e.target.files[0]);
+        }
+        function onDrop(e) {
+            e.preventDefault();
+            setDragging(false);
+            if (e.dataTransfer.files?.[0]) handleFile(e.dataTransfer.files[0]);
+        }
+
+        return (
+            <div className="space-y-2">
+                <label className="text-xs text-gray-400">Foto giocatore</label>
+                <div className="flex gap-3 items-start">
+                    {/* Preview quadrata */}
+                    <div className="w-20 h-20 rounded-xl overflow-hidden bg-gray-700 flex-shrink-0 flex items-center justify-center border-2 border-gray-600 shadow-inner">
+                        {value
+                            ? <img src={value} alt="preview" className="w-full h-full object-cover" />
+                            : <span className="text-3xl">🏉</span>
+                        }
+                    </div>
+
+                    {/* Zona drop */}
+                    <div
+                        className={`flex-1 rounded-xl border-2 border-dashed transition-all cursor-pointer text-center py-3 px-2 ${dragging ? "border-emerald-400 bg-emerald-900/20" : "border-gray-600 hover:border-gray-400 bg-gray-800/50"} ${uploading ? "opacity-60 pointer-events-none" : ""}`}
+                        onClick={() => fileInputRef.current?.click()}
+                        onDragOver={e => { e.preventDefault(); setDragging(true); }}
+                        onDragLeave={() => setDragging(false)}
+                        onDrop={onDrop}
+                    >
+                        {uploading ? (
+                            <div className="flex flex-col items-center gap-1">
+                                <div className="w-5 h-5 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin mx-auto"></div>
+                                <span className="text-xs text-gray-400">Caricamento...</span>
+                            </div>
+                        ) : (
+                            <div className="flex flex-col items-center gap-1">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 text-gray-400 mx-auto">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
+                                </svg>
+                                <span className="text-xs text-gray-300 font-medium">Carica foto</span>
+                                <span className="text-xs text-gray-500">JPG, PNG · crop automatico</span>
+                            </div>
+                        )}
+                    </div>
+                    <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={onFileInputChange} />
+                </div>
+
+                {uploadError && <p className="text-xs text-red-400">{uploadError}</p>}
+                {value && !uploading && (
+                    <button type="button" onClick={() => onChange("")} className="text-xs text-gray-500 hover:text-red-400 transition-colors">
+                        🗑 Rimuovi foto
+                    </button>
+                )}
+            </div>
+        );
+    }
+
+    // --- Icone per Tab ---
+    const ICONS = {
+        dashboard: <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3v11.25A2.25 2.25 0 0 0 6 16.5h12A2.25 2.25 0 0 0 20.25 14.25V3M3.75 21h16.5M16.5 3.75h.008v.008H16.5V3.75Z" /></svg>,
+        // addPoints: (Ya no se usa en el tab, pero lo guardamos para el FAB)
+        history: <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25H12" /></svg>,
+        admin: <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0M3.75 18H7.5m3-6h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0M3.75 12H7.5" /></svg>,
+        fantasy: <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M11.48 3.499a.562.562 0 0 1 1.04 0l2.125 5.111a.563.563 0 0 0 .475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 0 0-.182.557l1.285 5.385a.562.562 0 0 1-.84.61l-4.725-2.885a.562.562 0 0 0-.586 0L6.982 20.54a.562.562 0 0 1-.84-.61l1.285-5.386a.562.562 0 0 0-.182-.557l-4.204-3.602a.562.562 0 0 1 .321-.988l5.518-.442a.563.563 0 0 0 .475-.345L11.48 3.5Z" /></svg>
+    };
+    
+    function TabButton({ icon, label, activeTab, onClick }) {
+        // Oculta el tab si está activo (para el caso de 'addPoints' que ahora es una página)
+        const isActive = activeTab === label.toLowerCase();
+        
+        if (label.toLowerCase() === 'punti') return null; // Oculta permanentemente el tab 'Punti'
+
+        return (
+            <button
+                onClick={onClick}
+                className={`flex flex-col items-center p-2 rounded-xl text-xs font-medium ${isActive ? "text-emerald-400 bg-gray-800" : "text-gray-400 hover:text-gray-300"}`}
+            >
+                {ICONS[icon]}
+                {label}
+            </button>
+        );
+    }
+    
+    // --- LoginForm (Invariato) ---
+    function LoginForm({ onSubmit, onCancel }) {
+        const [show, setShow] = React.useState(false);
+        return (
+            <form onSubmit={onSubmit} className="flex flex-col gap-3 p-4 bg-gray-900 rounded-2xl shadow-xl max-w-sm w-full border border-gray-800">
+                <h3 className="text-xl font-semibold mb-2 text-center">Accedi</h3>
+                <input name="email" type="email" placeholder="Email" className="px-3 py-2 rounded-xl bg-gray-800 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" required />
+                <div className="flex items-center gap-2">
+                    <input name="password" type={show ? "text" : "password"} placeholder="Password" className="flex-grow px-3 py-2 rounded-xl bg-gray-800 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" required />
+                    <button type="button" onClick={()=>setShow(s=>!s)} className="p-2 rounded-xl bg-gray-700 text-gray-300 hover:bg-gray-600 transition-colors">
+                        {show ? ( <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 0 0 1.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0 1 12 4.5c4.756 0 8.773 3.162 10.065 7.498a10.522 10.522 0 0 1-4.293 5.774M6.228 6.228 3 3m3.228 3.228 3.65 3.65m7.894 7.894L21 21m-3.228-3.228-3.65-3.65m0 0a3 3 0 1 0-4.243-4.243m4.242 4.242L12 12" /></svg>
+                    ) : ( <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" /></svg>
+                    )}
+                </button>
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+                <button type="button" onClick={onCancel} className="px-4 py-2 rounded-xl bg-gray-800 hover:bg-gray-700 text-sm font-medium transition-colors">Annulla</button>
+                <button type="submit" className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-sm font-medium transition-colors">Accedi</button>
+            </div>
+        </form>
+        );
+    }
+    
+    // ======== NUOVI COMPONENTI DASHBOARD PRO ========
+    
+    // --- Il Nuovo Dashboard ---
+    function DashboardPro({ standings, players, tx, events, onShowProfile }) {
+        const topTeam = standings[0] || { name: "-", points: 0 };
+        
+        const playerPoints = useMemo(() => {
+             const map = new Map();
+             for (const m of tx) { 
+                 if (!m.playerId) continue; 
+                 const cur = map.get(m.playerId)||{points:0,count:0}; 
+                 cur.points += Number(m.delta)||0; 
+                 cur.count += 1; 
+                 map.set(m.playerId, cur); 
+             }
+             return players.map(p=>({ 
+                 ...p,
+                 points: map.get(p.id)?.points||0, 
+                 count: map.get(p.id)?.count||0 
+             })).sort((a,b)=>b.points-a.points||a.name.localeCompare(b.name));
+        }, [players, tx]);
+        
+        const topPlayer = playerPoints[0] || { name: "-", points: 0 };
+
+        return (
+            <section className="space-y-6">
+                {/* 1. Hero Section */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800 text-center">
+                        <h3 className="text-sm font-semibold text-gray-400">Squadra in Testa</h3>
+                        <p className="text-3xl font-bold" style={{ color: topTeam.color || '#fff' }}>{topTeam.name}</p>
+                        <p className="text-xl text-gray-200">{topTeam.points.toFixed(2)} Punti</p>
+                    </div>
+                    <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800 text-center">
+                        <h3 className="text-sm font-semibold text-gray-400">Giocatore Top</h3>
+                        <p className="text-3xl font-bold text-emerald-400">{topPlayer.name}</p>
+                        <p className="text-xl text-gray-200">{topPlayer.points.toFixed(2)} Punti</p>
+                    </div>
+                </div>
+
+                {/* 2. Grafico: Corsa ai Punti */}
+                <div className="bg-gray-900 rounded-2xl p-4 shadow">
+                    <h3 className="text-lg font-semibold mb-3">Corsa ai Punti (Squadre)</h3>
+                    <TeamPointsLineChart tx={tx} />
+                </div>
+                
+                {/* 3. Classifica Giocatori (Cliccabile) */}
+                <div className="bg-gray-900 rounded-2xl p-4 shadow">
+                    <h3 className="text-lg font-semibold mb-3">Classifica Individuale</h3>
+                    <Leaderboard players={playerPoints} onShowProfile={onShowProfile} />
+                </div>
+
+                {/* 4. Statistiche Eventi */}
+                <div className="bg-gray-900 rounded-2xl p-4 shadow">
+                    <h3 className="text-lg font-semibold mb-3">Statistiche Eventi</h3>
+                    <EventStats tx={tx} events={events} />
+                </div>
+            </section>
+        );
+    }
+    
+    // --- Grafico Linee: Punti Squadre nel Tempo ---
+    function TeamPointsLineChart({ tx }) {
+        const chartRef = useRef(null);
+        const chartInstance = useRef(null);
+
+        const chartData = useMemo(() => {
+            const sortedTx = [...tx].sort((a, b) => (a.ts?.toMillis() || 0) - (b.ts?.toMillis() || 0));
+            const datasets = {};
+            const runningTotals = {};
+            const labels = [];
+            
+            TEAM_LIST.forEach(team => {
+                datasets[team.id] = {
+                    label: team.name,
+                    data: [],
+                    borderColor: team.color,
+                    backgroundColor: team.color,
+                    fill: false,
+                    tension: 0.1
+                };
+                runningTotals[team.id] = 0;
+            });
+            
+            let lastDate = null;
+
+            sortedTx.forEach(item => {
+                const date = item.ts?.toDate().toLocaleDateString() || "unknown";
+                
+                if (date !== lastDate) {
+                    labels.push(date);
+                    lastDate = date;
+                    // Porta avanti i totali per la nuova data
+                    TEAM_LIST.forEach(team => {
+                        datasets[team.id].data.push(runningTotals[team.id]);
+                    });
+                }
+                
+                if (runningTotals[item.teamId] !== undefined) {
+                    runningTotals[item.teamId] += (Number(item.delta) || 0);
+                    // Aggiorna l'ultimo punto per la data corrente
+                    datasets[item.teamId].data[datasets[item.teamId].data.length - 1] = runningTotals[item.teamId];
+                }
+            });
+
+            return { labels, datasets: Object.values(datasets) };
+        }, [tx]);
+
+        useEffect(() => {
+            if (!chartRef.current) return;
+            if (chartInstance.current) {
+                chartInstance.current.destroy();
+            }
+            
+            const ctx = chartRef.current.getContext('2d');
+            chartInstance.current = new Chart(ctx, {
+                type: 'line',
+                data: chartData,
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: { ticks: { color: '#9ca3af' }, grid: { color: '#374151' } },
+                        y: { ticks: { color: '#9ca3af' }, grid: { color: '#374151' } }
+                    },
+                    plugins: {
+                        legend: { labels: { color: '#d1d5db' } },
+                        tooltip: { 
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.dataset.label || '';
+                                    if (label) {
+                                        label += ': ';
+                                    }
+                                    if (context.parsed.y !== null) {
+                                        label += context.parsed.y.toFixed(2);
+                                    }
+                                    return label;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            return () => {
+                if (chartInstance.current) {
+                    chartInstance.current.destroy();
+                }
+            };
+        }, [chartData]);
+
+        return <div className="h-64"><canvas ref={chartRef}></canvas></div>;
+    }
+
+    // --- Tabella Classifica (Ora Cliccabile) ---
+    function Leaderboard({ players, onShowProfile }) {
+        const [q,setQ]=React.useState("");
+        const [team,setTeam]=React.useState("");
+        const filtered = players.filter(r => (!team||r.teamId===team) && (!q||r.name.toLowerCase().includes(q.toLowerCase())));
+        
+        return (
+            <div className="rounded-xl border border-gray-800">
+                <div className="p-2 flex flex-col gap-2 text-sm">
+                    <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Cerca giocatore" className="px-2 py-1 rounded-lg bg-gray-800"/>
+                    <select value={team} onChange={e=>setTeam(e.target.value)} className="px-2 py-1 rounded-lg bg-gray-800">
+                        <option value="">Tutte le squadre</option>
+                        {TEAM_LIST.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    </select>
+                    {(q||team) && <button onClick={()=>{setQ(""); setTeam("");}} className="px-2 py-1 bg-gray-800 rounded-lg hover:bg-gray-700">Pulisci</button>}
+                </div>
+                <div className="divide-y divide-gray-800">
+                    {filtered.length===0 ? (
+                        <div className="px-3 py-3 text-gray-400 text-sm">Nessun dato.</div>
+                    ) : filtered.slice(0, 15).map((r,i)=> {
+                        const photo = r.photoUrl || getPlayerPhoto(r.name);
+                        const teamColor = TEAM_LIST.find(t=>t.id===r.teamId)?.color || '#fff';
+                        const teamName = TEAM_LIST.find(t=>t.id===r.teamId)?.name || '';
+                        return (
+                            <button key={r.id} onClick={() => onShowProfile(r.id)} className="w-full flex items-center gap-3 px-3 py-2 hover:bg-gray-800/60 transition-colors text-left">
+                                {/* Rank */}
+                                <div className={`w-7 text-center text-sm font-bold flex-shrink-0 ${i===0?"text-yellow-400":i===1?"text-gray-300":i===2?"text-orange-500":"text-gray-500"}`}>
+                                    {i===0?"🥇":i===1?"🥈":i===2?"🥉":`#${i+1}`}
+                                </div>
+                                {/* Foto */}
+                                <div className="w-10 h-10 rounded-xl overflow-hidden bg-gray-700 flex-shrink-0 flex items-center justify-center">
+                                    {photo
+                                        ? <img src={photo} alt={r.name} className="w-full h-full object-cover object-top" onError={e=>{e.target.style.display='none';e.target.parentNode.innerHTML='🏉';}} />
+                                        : <span className="text-lg">🏉</span>
+                                    }
+                                </div>
+                                {/* Nome + squadra + ruolo */}
+                                <div className="flex-1 min-w-0">
+                                    <div className="font-medium text-emerald-400 text-sm truncate">{r.name}</div>
+                                    <div className="flex gap-2 items-center">
+                                        <span className="text-xs" style={{color: teamColor}}>{teamName}</span>
+                                        {r.role && <span className="text-xs text-gray-500">· {r.role}</span>}
+                                    </div>
+                                </div>
+                                {/* Stats */}
+                                <div className="text-right flex-shrink-0">
+                                    <div className="font-semibold text-white text-sm">{r.points.toFixed(2)}</div>
+                                    <div className="text-xs text-gray-500">{r.count} ev.</div>
+                                </div>
+                            </button>
+                        );
+                    })}
+                </div>
+            </div>
+        );
+    }
+
+    // --- Statistiche Eventi (Invariato) ---
+    function EventStats({ tx, events }) {
+        const map = new Map();
+        for (const m of tx) { 
+            const cur = map.get(m.eventId)||{count:0,points:0,last:0}; 
+            const quantity = m.quantity || 1;
+            cur.count += quantity;
+            cur.points += Number(m.delta)||0; 
+            const t=m.ts?.toMillis?m.ts.toMillis():0; 
+            cur.last=Math.max(cur.last,t); 
+            map.set(m.eventId,cur); 
+        }
+        const rows = Array.from(map.entries()).map(([eventId,v])=>({ id:eventId, name:(events.find(e=>e.id===eventId)?.name)||eventId, count:v.count, points:v.points, last:v.last })).sort((a,b)=> b.count-a.count || a.name.localeCompare(b.name));
+        return (
+            <div className="overflow-x-auto rounded-xl border border-gray-800">
+                <table className="min-w-full text-sm">
+                    <thead className="bg-gray-800"><tr className="text-left text-gray-300">
+                        <th className="px-3 py-2">Evento</th>
+                        <th className="px-3 py-2">Occorrenze</th>
+                        <th className="px-3 py-2">Punti totali</th>
+                        <th className="px-3 py-2">Ultima volta</th>
+                    </tr></thead>
+                    <tbody>
+                        {rows.length===0 ? (
+                            <tr><td className="px-3 py-3 text-gray-400" colSpan={4}>Nessun dato.</td></tr>
+                        ) : rows.map(r => (
+                            <tr key={r.id} className="border-t border-gray-800">
+                                <td className="px-3 py-2">{r.name}</td>
+                                <td className="px-3 py-2">{r.count}</td>
+                                <td className={"px-3 py-2 " + (r.points>=0?"text-emerald-400":"text-red-400")}>{r.points>=0?"+":""}{r.points.toFixed(2)}</td>
+                                <td className="px-3 py-2">{r.last? new Date(r.last).toLocaleString(): "-"}</td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        );
+    }
+    
+    // --- NUOVO: Modale Profilo Giocatore ---
+    function PlayerProfileModal({ playerId, players, tx, events, onClose }) {
+        const player = players.find(p => p.id === playerId);
+        const playerTx = useMemo(() => tx.filter(t => t.playerId === playerId), [tx, playerId]);
+
+        const eventStats = useMemo(() => {
+            const map = new Map();
+            for (const m of playerTx) {
+                const ev = events.find(e => e.id === m.eventId);
+                if (!ev) continue;
+                const cur = map.get(m.eventId) || { name: ev.name, count: 0, points: 0 };
+                cur.count += (m.quantity || 1);
+                cur.points += (Number(m.delta) || 0);
+                map.set(m.eventId, cur);
+            }
+            return Array.from(map.values()).sort((a, b) => b.count - a.count);
+        }, [playerTx, events]);
+
+        const totalPoints = playerTx.reduce((sum, t) => sum + (Number(t.delta) || 0), 0);
+        const team = TEAM_LIST.find(t => t.id === player?.teamId);
+        
+        const chartRef = useRef(null);
+        
+        useEffect(() => {
+            if (!chartRef.current) return;
+            const ctx = chartRef.current.getContext('2d');
+            const chart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: eventStats.map(e => e.name),
+                    datasets: [{
+                        label: 'Occorrenze Evento',
+                        data: eventStats.map(e => e.count),
+                        backgroundColor: eventStats.map(e => e.points > 0 ? '#10b981' : '#f43f5e'),
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { ticks: { color: '#9ca3af' }, grid: { color: '#374151' } },
+                        y: { ticks: { color: '#d1d5db' }, grid: { color: '#374151' } }
+                    },
+                }
+            });
+            return () => chart.destroy();
+        }, [eventStats]);
+
+        if (!player) return null;
+
+        const photo = player.photoUrl || getPlayerPhoto(player.name);
+
+        return (
+            <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-40" onClick={onClose}>
+                <div className="bg-gray-900 rounded-2xl max-w-lg w-full p-6 border border-gray-700 space-y-4 max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+                    <div className="flex justify-between items-start gap-4">
+                        <div className="flex gap-4 items-center">
+                            {/* Foto grande nel profilo */}
+                            <div className="w-20 h-20 rounded-2xl overflow-hidden bg-gray-700 flex-shrink-0 flex items-center justify-center shadow-lg">
+                                {photo
+                                    ? <img src={photo} alt={player.name} className="w-full h-full object-cover object-top" onError={e=>{e.target.style.display='none';e.target.parentNode.innerHTML='<span style="font-size:2rem">🏉</span>';}} />
+                                    : <span className="text-4xl">🏉</span>
+                                }
+                            </div>
+                            <div>
+                                <h2 className="text-2xl font-bold text-emerald-400">{player.name}</h2>
+                                <p className="text-lg font-semibold" style={{ color: team?.color || '#fff' }}>{team?.name}</p>
+                                {player.role && <p className="text-sm text-gray-400 mt-0.5">🏉 {player.role}</p>}
+                                <div className="flex gap-3 text-xs text-gray-500 mt-0.5">
+                                    {player.number && <span>#{player.number}</span>}
+                                    {player.nationality && <span>🌍 {player.nationality}</span>}
+                                </div>
+                                <p className="text-xl mt-1">{totalPoints.toFixed(2)} Punti Totali</p>
+                            </div>
+                        </div>
+                        <button onClick={onClose} className="text-gray-400 hover:text-white text-2xl flex-shrink-0">&times;</button>
+                    </div>
+                    
+                    {/* Bio se presente */}
+                    {player.bio && (
+                        <div className="bg-gray-800 rounded-xl p-3 text-sm text-gray-300 italic border border-gray-700">
+                            "{player.bio}"
+                        </div>
+                    )}
+
+                    {/* Grafico Statistiche Eventi */}
+                    <div className="h-64">
+                        <canvas ref={chartRef}></canvas>
+                    </div>
+
+                    {/* Storico Recente */}
+                    <h3 className="text-lg font-semibold">Storico Recente</h3>
+                    <div className="overflow-x-auto rounded-xl border border-gray-800 max-h-48">
+                        <table className="min-w-full text-sm">
+                            <thead className="bg-gray-800"><tr>
+                                <th className="px-3 py-2 text-left">Evento</th>
+                                <th className="px-3 py-2 text-left">Punti</th>
+                                <th className="px-3 py-2 text-left">Data</th>
+                            </tr></thead>
+                            <tbody>
+                                {playerTx.slice(0, 10).map(item => (
+                                    <tr key={item.fid} className="border-t border-gray-800">
+                                        <td className="px-3 py-2">{events.find(e => e.id === item.eventId)?.name || "-"}</td>
+                                        <td className={"px-3 py-2 " + (item.delta >= 0 ? "text-emerald-400" : "text-red-400")}>{item.delta}</td>
+                                        <td className="px-3 py-2">{item.ts?.toDate().toLocaleDateString()}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+    
+    // --- NUOVO: Pannello Admin ---
+    function AdminPanel({ players, events, db, collection, doc, setDoc, deleteDoc, addDoc, slugify }) {
+        const [adminTab, setAdminTab] = useState('players');
+        const [editingPlayer, setEditingPlayer] = useState(null); // null = nessuno, {fid, ...data} = modifica
+
+        async function handlePlayerFullUpdate(fid, data) {
+            if (!fid) return alert("Dati mancanti");
+            await setDoc(doc(db, "players", fid), data, { merge: true });
+            setEditingPlayer(null);
+            alert("Giocatore aggiornato!");
+        }
+        
+        async function handleEventSave(e) {
+            e.preventDefault();
+            const form = new FormData(e.target);
+            const fid = form.get('fid');
+            const data = {
+                id: form.get('id').toUpperCase(),
+                name: form.get('name'),
+                points: Number(form.get('points')),
+                allowQuantity: form.get('allowQuantity') === 'on'
+            };
+            if (!data.id || !data.name) return alert("ID e Nome sono obbligatori");
+            const docRef = fid ? doc(db, "events_config", fid) : doc(db, "events_config", data.id);
+            await setDoc(docRef, data, { merge: true });
+            e.target.reset();
+            alert("Evento salvato!");
+        }
+
+        async function handleEventDelete(fid) {
+            if (!confirm("Sei sicuro di voler eliminare questo evento?")) return;
+            await deleteDoc(doc(db, "events_config", fid));
+            alert("Evento eliminato!");
+        }
+
+        // Ruoli rugby standard
+        const RUGBY_ROLES = [
+            "Pilone sinistro","Tallonatore","Pilone destro",
+            "Seconda linea","Flanker","Numero 8",
+            "Mediano di mischia","Mediano d'apertura",
+            "Centro","Ala","Estremo","Terza linea centro","Terza linea"
+        ];
+
+        return (
+            <section className="bg-gray-900 rounded-2xl p-4 shadow space-y-4">
+                <h2 className="text-xl font-semibold">Pannello Amministrazione</h2>
+                
+                {/* Navigazione Tab Admin */}
+                <div className="flex gap-2 border-b border-gray-700">
+                    <button onClick={() => setAdminTab('players')} className={`px-4 py-2 text-sm ${adminTab === 'players' ? 'border-b-2 border-emerald-400 text-emerald-400' : 'text-gray-400'}`}>Gestione Giocatori</button>
+                    <button onClick={() => setAdminTab('events')} className={`px-4 py-2 text-sm ${adminTab === 'events' ? 'border-b-2 border-emerald-400 text-emerald-400' : 'text-gray-400'}`}>Gestione Eventi</button>
+                </div>
+                
+                {/* Tab Gestione Giocatori */}
+                {adminTab === 'players' && (
+                    <div className="space-y-3">
+                        <p className="text-sm text-gray-400">Clicca su un giocatore per modificarne i dati completi (squadra, ruolo/i, foto URL).</p>
+                        <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
+                            {players.map(p => {
+                                const isEditing = editingPlayer?.fid === p.fid;
+                                const photo = p.photoUrl || getPlayerPhoto(p.name);
+                                return (
+                                    <div key={p.fid} className={`rounded-xl border transition-all ${isEditing ? "border-emerald-500 bg-gray-800" : "border-gray-800 bg-gray-800/40"}`}>
+                                        {/* Riga riassuntiva (sempre visibile) */}
+                                        <button
+                                            className="w-full flex items-center gap-3 p-3 text-left"
+                                            onClick={() => setEditingPlayer(isEditing ? null : { ...p })}
+                                        >
+                                            <div className="w-10 h-10 rounded-xl overflow-hidden bg-gray-700 flex-shrink-0 flex items-center justify-center">
+                                                {photo
+                                                    ? <img src={photo} alt={p.name} className="w-full h-full object-cover object-top" onError={e=>{e.target.style.display='none';}} />
+                                                    : <span className="text-xl">🏉</span>
+                                                }
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <div className="font-semibold text-sm text-white truncate">{p.name}</div>
+                                                <div className="flex gap-2 text-xs text-gray-400 flex-wrap">
+                                                    <span style={{color: TEAM_LIST.find(t=>t.id===p.teamId)?.color}}>{TEAM_LIST.find(t=>t.id===p.teamId)?.name || "N/A"}</span>
+                                                    {p.fantasyPosition
+                                                        ? <span className="text-emerald-400">🏉 #{FANTASY_POSITIONS.find(fp=>fp.key===p.fantasyPosition)?.short} {FANTASY_POSITIONS.find(fp=>fp.key===p.fantasyPosition)?.label}</span>
+                                                        : <span className="text-amber-500">⚠️ No posizione</span>
+                                                    }
+                                                </div>
+                                            </div>
+                                            <span className="text-gray-500 text-xs">{isEditing ? "▲ Chiudi" : "✏️ Modifica"}</span>
+                                        </button>
+
+                                        {/* Form di modifica (espandibile) */}
+                                        {isEditing && (
+                                            <div className="px-3 pb-3 space-y-3 border-t border-gray-700 pt-3">
+                                                {/* Foto upload con crop */}
+                                                <PhotoCropUploader
+                                                    value={editingPlayer.photoUrl || photo || ""}
+                                                    onChange={url => setEditingPlayer(ep => ({...ep, photoUrl: url}))}
+                                                />
+
+                                                {/* Nome */}
+                                                <div>
+                                                    <label className="text-xs text-gray-400">Nome</label>
+                                                    <input
+                                                        value={editingPlayer.name || ""}
+                                                        onChange={e => setEditingPlayer(ep => ({...ep, name: e.target.value}))}
+                                                        className="w-full mt-1 px-2 py-1.5 rounded-lg bg-gray-700 text-sm"
+                                                    />
+                                                </div>
+
+                                                {/* Squadra */}
+                                                <div>
+                                                    <label className="text-xs text-gray-400">Squadra</label>
+                                                    <select
+                                                        value={editingPlayer.teamId || ""}
+                                                        onChange={e => setEditingPlayer(ep => ({...ep, teamId: e.target.value}))}
+                                                        className="w-full mt-1 px-2 py-1.5 rounded-lg bg-gray-700 text-sm"
+                                                    >
+                                                        <option value="">— Seleziona —</option>
+                                                        {TEAM_LIST.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                                                    </select>
+                                                </div>
+
+                                                {/* Posizione Fantasy — SLOT UNICO sul campo */}
+                                                <div>
+                                                    <label className="text-xs text-gray-400 font-semibold flex items-center gap-1">
+                                                        🏉 Posizione Fantasy
+                                                        <span className="font-normal text-gray-500">(slot assegnato sul campo)</span>
+                                                    </label>
+                                                    <select
+                                                        value={editingPlayer.fantasyPosition || ""}
+                                                        onChange={e => setEditingPlayer(ep => ({...ep, fantasyPosition: e.target.value}))}
+                                                        className={`w-full mt-1 px-2 py-2 rounded-lg text-sm font-medium border ${editingPlayer.fantasyPosition ? "bg-emerald-900/40 border-emerald-600 text-emerald-300" : "bg-gray-700 border-gray-600 text-gray-400"}`}
+                                                    >
+                                                        <option value="">— Non assegnata —</option>
+                                                        {["Prima linea","Seconda linea","Terza linea","Mediani","Centri","Trequarti"].map(group => (
+                                                            <optgroup key={group} label={group}>
+                                                                {FANTASY_POSITIONS.filter(fp => fp.group === group).map(fp => (
+                                                                    <option key={fp.key} value={fp.key}>#{fp.short} – {fp.label}</option>
+                                                                ))}
+                                                            </optgroup>
+                                                        ))}
+                                                    </select>
+                                                    {!editingPlayer.fantasyPosition && (
+                                                        <p className="text-xs text-amber-400 mt-1">⚠️ Senza posizione il giocatore non sarà selezionabile nel Fantasy</p>
+                                                    )}
+                                                </div>
+
+                                                {/* Ruolo/i descrittivo (multi-select visuale) */}
+                                                <div>
+                                                    <label className="text-xs text-gray-400">Ruolo/i descrittivo (visibile nel profilo)</label>
+                                                    <div className="flex flex-wrap gap-1.5 mt-1">
+                                                        {RUGBY_ROLES.map(role => {
+                                                            const currentRoles = (editingPlayer.role || "").split(",").map(r=>r.trim()).filter(Boolean);
+                                                            const isActive = currentRoles.includes(role);
+                                                            return (
+                                                                <button
+                                                                    key={role}
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        const cur = (editingPlayer.role||"").split(",").map(r=>r.trim()).filter(Boolean);
+                                                                        const next = cur.includes(role) ? cur.filter(r=>r!==role) : [...cur, role];
+                                                                        setEditingPlayer(ep => ({...ep, role: next.join(", ")}));
+                                                                    }}
+                                                                    className={`text-xs px-2 py-1 rounded-lg border transition-all ${isActive ? "bg-indigo-600 border-indigo-500 text-white" : "bg-gray-700 border-gray-600 text-gray-300 hover:border-gray-400"}`}
+                                                                >
+                                                                    {role}
+                                                                </button>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                    {editingPlayer.role && (
+                                                        <div className="text-xs text-indigo-400 mt-1">{editingPlayer.role}</div>
+                                                    )}
+                                                </div>
+
+                                                {/* Numero maglia */}
+                                                <div className="grid grid-cols-2 gap-2">
+                                                    <div>
+                                                        <label className="text-xs text-gray-400">N° Maglia</label>
+                                                        <input
+                                                            type="number" min="1" max="99"
+                                                            value={editingPlayer.number || ""}
+                                                            onChange={e => setEditingPlayer(ep => ({...ep, number: e.target.value}))}
+                                                            placeholder="es. 10"
+                                                            className="w-full mt-1 px-2 py-1.5 rounded-lg bg-gray-700 text-sm"
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-xs text-gray-400">Nazionalità</label>
+                                                        <input
+                                                            value={editingPlayer.nationality || ""}
+                                                            onChange={e => setEditingPlayer(ep => ({...ep, nationality: e.target.value}))}
+                                                            placeholder="es. Italiano"
+                                                            className="w-full mt-1 px-2 py-1.5 rounded-lg bg-gray-700 text-sm"
+                                                        />
+                                                    </div>
+                                                </div>
+
+                                                {/* Note */}
+                                                <div>
+                                                    <label className="text-xs text-gray-400">Note / Bio breve</label>
+                                                    <textarea
+                                                        value={editingPlayer.bio || ""}
+                                                        onChange={e => setEditingPlayer(ep => ({...ep, bio: e.target.value}))}
+                                                        rows={2}
+                                                        placeholder="Note opzionali sul giocatore..."
+                                                        className="w-full mt-1 px-2 py-1.5 rounded-lg bg-gray-700 text-sm resize-none"
+                                                    />
+                                                </div>
+
+                                                {/* Bottoni azione */}
+                                                <div className="flex gap-2 justify-end pt-1">
+                                                    <button onClick={() => setEditingPlayer(null)} className="px-3 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm">Annulla</button>
+                                                    <button
+                                                        onClick={() => handlePlayerFullUpdate(p.fid, {
+                                                            name: editingPlayer.name,
+                                                            teamId: editingPlayer.teamId,
+                                                            fantasyPosition: editingPlayer.fantasyPosition || "",
+                                                            role: editingPlayer.role || "",
+                                                            number: editingPlayer.number || "",
+                                                            nationality: editingPlayer.nationality || "",
+                                                            bio: editingPlayer.bio || "",
+                                                            photoUrl: editingPlayer.photoUrl || "",
+                                                        })}
+                                                        className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-sm font-medium"
+                                                    >💾 Salva tutto</button>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
+                
+                {/* Tab Gestione Eventi */}
+                {adminTab === 'events' && (
+                    <div className="space-y-4">
+                        <h3 className="text-lg font-semibold">Gestione Eventi</h3>
+                        
+                        {/* Form Creazione/Modifica Evento */}
+                        <form onSubmit={handleEventSave} className="grid grid-cols-1 md:grid-cols-3 gap-3 p-3 bg-gray-800 rounded-lg">
+                            <input name="fid" type="hidden" /> {/* Per Update */}
+                            <input name="id" required placeholder="ID Evento (es. META_PROVA)" className="bg-gray-700 p-2 rounded-lg" />
+                            <input name="name" required placeholder="Nome Evento (es. Meta di Prova)" className="bg-gray-700 p-2 rounded-lg" />
+                            <input name="points" required type="number" step="0.01" placeholder="Punti (es. 1.5 o -2)" className="bg-gray-700 p-2 rounded-lg" />
+                            <label className="flex items-center gap-2 text-sm"><input name="allowQuantity" type="checkbox" className="form-checkbox bg-gray-700" /> Permetti Quantità?</label>
+                            <button type="submit" className="bg-emerald-600 p-2 rounded-lg md:col-span-3">Salva Nuovo Evento</button>
+                        </form>
+                        
+                        {/* Lista Eventi Esistenti */}
+                        <div className="overflow-x-auto rounded-xl border border-gray-800 max-h-96">
+                            <table className="min-w-full text-sm">
+                                <thead className="bg-gray-800"><tr>
+                                    <th className="px-3 py-2 text-left">ID</th>
+                                    <th className="px-3 py-2 text-left">Nome</th>
+                                    <th className="px-3 py-2 text-left">Punti</th>
+                                    <th className="px-3 py-2 text-left">Q.tà?</th>
+                                    <th className="px-3 py-2 text-left">Azioni</th>
+                                </tr></thead>
+                                <tbody>
+                                    {events.map(ev => (
+                                        <tr key={ev.fid} className="border-t border-gray-800">
+                                            <td className="px-3 py-2 font-mono text-xs">{ev.id}</td>
+                                            <td className="px-3 py-2">{ev.name}</td>
+                                            <td className="px-3 py-2">{ev.points}</td>
+                                            <td className="px-3 py-2">{ev.allowQuantity ? 'Sì' : 'No'}</td>
+                                            <td className="px-3 py-2"><button onClick={() => handleEventDelete(ev.fid)} className="bg-red-600 px-2 py-1 rounded-lg text-xs">Elimina</button></td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                )}
+            </section>
+        );
+    }
+
+    // ======== FANTASY MODULE ========
+
+    // Mappa nome giocatore (slugified) → foto ufficiale dal sito BRC
+    const BRC_PLAYER_PHOTOS = {
+        "BERNARDO_LIVOTTO": "https://www.bolognarugbyclub.it/wp-content/uploads/2026/03/LivottoBernardo26.png",
+        "EDO_RESTA": "https://www.bolognarugbyclub.it/wp-content/uploads/2026/01/RestaEdo.png",
+        "ORESTE_CANNONIERO": "https://www.bolognarugbyclub.it/wp-content/uploads/2025/12/CannonieroOreste.png",
+        "TOMMASO_BOSCHETTI": "https://www.bolognarugbyclub.it/wp-content/uploads/2025/10/BoschettiTommaso.png",
+        "TOMMASO_COVILI": "https://www.bolognarugbyclub.it/wp-content/uploads/2025/09/CoviliAlessandro.png",
+        "FILIPPO_MORELLI": "https://www.bolognarugbyclub.it/wp-content/uploads/2025/09/MorelliFilippo.png",
+        "VITTORIO_BASEGGIO": "https://www.bolognarugbyclub.it/wp-content/uploads/2025/09/BaseggioVittorio.png",
+        "ALESSANDRO_PAGNINI": "https://www.bolognarugbyclub.it/wp-content/uploads/2025/09/PagniniAlessandro.png",
+        "CRISTIANO_SALVI": "https://www.bolognarugbyclub.it/wp-content/uploads/2025/09/SalviCristiano.png",
+        "SIMONE_DE_ANGELIS": "https://www.bolognarugbyclub.it/wp-content/uploads/2025/09/DeAngelisSimone.png",
+        "MATTIA_BARATTA": "https://www.bolognarugbyclub.it/wp-content/uploads/2025/09/BarattaMattia.png",
+        "RICCARDO_TERUGGI": "https://www.bolognarugbyclub.it/wp-content/uploads/2025/09/TeruggiRiccardo.png",
+        "GIORGIO_ALADIAH_CUSCINI": "https://www.bolognarugbyclub.it/wp-content/uploads/2025/09/CusciniGiorgioAladiah.png",
+        "JOSE_CHICO_CISTOLA": "https://www.bolognarugbyclub.it/wp-content/uploads/2025/10/ChicoJose2.png",
+        "GUGLIELMO_BERNARDI": "https://www.bolognarugbyclub.it/wp-content/uploads/2025/09/BernardiGuglielmo.png",
+        "NICOLAS_BONINI": "https://www.bolognarugbyclub.it/wp-content/uploads/2025/09/BoniniNicolas.png",
+        "MATTEO_CESARI": "https://www.bolognarugbyclub.it/wp-content/uploads/2026/03/CesariMatteo26.png",
+        "ALBERTO_BIONDI": "https://www.bolognarugbyclub.it/wp-content/uploads/2026/03/BiondiAlberto26.png",
+        "DEMETRIO_VILASI": "https://www.bolognarugbyclub.it/wp-content/uploads/2023/05/VilasiDemetrio.png",
+        "MASSIMO_SIGNORE": "https://www.bolognarugbyclub.it/wp-content/uploads/2025/10/SignoreMassimo2.png",
+        "PIETRO_FATTORI": "https://www.bolognarugbyclub.it/wp-content/uploads/2025/09/FattoriPietro.png",
+        "FEDERICO_SILVESTRI": "https://www.bolognarugbyclub.it/wp-content/uploads/2025/09/SilvestriFederico.png",
+        "DENIS_AMICO": "https://www.bolognarugbyclub.it/wp-content/uploads/2025/09/AmicoDenis.png",
+        "EDOARDO_TERESI": "https://www.bolognarugbyclub.it/wp-content/uploads/2026/03/TeresiEdoardo26.png",
+        "PIETRO_MARZOCCHI_TRAVERSA": "https://www.bolognarugbyclub.it/wp-content/uploads/2025/10/MarzocchiPietro2.png",
+        "FEDERICO_TARANTINO": "https://www.bolognarugbyclub.it/wp-content/uploads/2025/09/TarantinoFederico.png",
+        "GUIDO_QUADRI": "https://www.bolognarugbyclub.it/wp-content/uploads/2021/10/QuadriGuido.png",
+        "TOMAS_ZAMBRELLA": "https://www.bolognarugbyclub.it/wp-content/uploads/2025/10/ZambrellaTomas2.png",
+        "GIOVANNI_GIO_VISENTIN": "https://www.bolognarugbyclub.it/wp-content/uploads/2021/10/VisentinGiovanni.png",
+        "FABIO_PRIOLA": "https://www.bolognarugbyclub.it/wp-content/uploads/2025/10/PriolaFabio2.png",
+        "LUCA_PANCALDI": "https://www.bolognarugbyclub.it/wp-content/uploads/2025/10/PancaldiLuca2.png",
+        "FRANCESCO_GAMBACORTA": "https://www.bolognarugbyclub.it/wp-content/uploads/2025/10/GambacortaFrancesco2.png",
+        "GIACOMO_ANTEGHINI": "https://www.bolognarugbyclub.it/wp-content/uploads/2025/10/AnteginiGiacomo2.png",
+        "FILIPPO_SCHIAVONE": "https://www.bolognarugbyclub.it/wp-content/uploads/2025/10/SchiavoneFilippo2.png",
+        "EDOARDO_BERNABO": "https://www.bolognarugbyclub.it/wp-content/uploads/2025/09/BernaboEdoardo.png",
+        "FEDERICO_SOAVI": "https://www.bolognarugbyclub.it/wp-content/uploads/2025/09/SoaviFederico.png",
+        "VITO_ANDREA_DE_NAPOLI": "https://www.bolognarugbyclub.it/wp-content/uploads/2025/09/DeNapoliVitoAndrea.png",
+    };
+
+    const FANTASY_BUDGET = 1000;
+    const MAX_TEAM_SIZE = 15;
+
+    // Posizioni Fantasy — ogni slot sul campo ha una posizione univoca
+    // La chiave è usata in Firestore come p.fantasyPosition
+    const FANTASY_POSITIONS = [
+        { key: "pilone_sx",    label: "Pilone Sinistro",   short: "1",  group: "Prima linea"   },
+        { key: "tallonatore",  label: "Tallonatore",        short: "2",  group: "Prima linea"   },
+        { key: "pilone_dx",    label: "Pilone Destro",      short: "3",  group: "Prima linea"   },
+        { key: "seconda_a",    label: "Seconda Linea",      short: "4",  group: "Seconda linea" },
+        { key: "seconda_b",    label: "Seconda Linea",      short: "5",  group: "Seconda linea" },
+        { key: "flanker_sx",   label: "Flanker",            short: "6",  group: "Terza linea"   },
+        { key: "numero8",      label: "Numero 8",           short: "8",  group: "Terza linea"   },
+        { key: "flanker_dx",   label: "Flanker",            short: "7",  group: "Terza linea"   },
+        { key: "apertura",     label: "Mediano d'Apertura", short: "10", group: "Mediani"       },
+        { key: "mischia",      label: "Mediano di Mischia", short: "9",  group: "Mediani"       },
+        { key: "centro_sx",    label: "Centro",             short: "12", group: "Centri"        },
+        { key: "centro_dx",    label: "Centro",             short: "13", group: "Centri"        },
+        { key: "ala_sx",       label: "Ala Sinistra",       short: "11", group: "Trequarti"     },
+        { key: "estremo",      label: "Estremo",            short: "15", group: "Trequarti"     },
+        { key: "ala_dx",       label: "Ala Destra",         short: "14", group: "Trequarti"     },
+    ];
+
+    // Mappa posizione → compatibilità (un giocatore con fantasyPosition X può coprire questi slot)
+    // Consente flessibilità: es. un Flanker può giocare anche come N°8
+    const POSITION_COMPATIBILITY = {
+        "pilone_sx":   ["pilone_sx", "pilone_dx"],
+        "tallonatore": ["tallonatore"],
+        "pilone_dx":   ["pilone_dx", "pilone_sx"],
+        "seconda_a":   ["seconda_a", "seconda_b"],
+        "seconda_b":   ["seconda_b", "seconda_a"],
+        "flanker_sx":  ["flanker_sx", "flanker_dx", "numero8"],
+        "numero8":     ["numero8", "flanker_sx", "flanker_dx"],
+        "flanker_dx":  ["flanker_dx", "flanker_sx", "numero8"],
+        "apertura":    ["apertura"],
+        "mischia":     ["mischia"],
+        "centro_sx":   ["centro_sx", "centro_dx"],
+        "centro_dx":   ["centro_dx", "centro_sx"],
+        "ala_sx":      ["ala_sx", "ala_dx", "estremo"],
+        "estremo":     ["estremo", "ala_sx", "ala_dx"],
+        "ala_dx":      ["ala_dx", "ala_sx", "estremo"],
+    };
+
+    // Calcola prezzi normalizzati: media target = budget/15 ≈ 66, range 40–100
+    // Riceve tutti i giocatori per fare la normalizzazione relativa
+    function calcFantasyPrices(players, txMap) {
+        // Calcola raw score per ogni giocatore
+        const scores = players.map(p => {
+            const s = txMap.get(p.id) || { points: 0, count: 0 };
+            return Math.max(0, s.points) * 1 + s.count * 0.5;
+        });
+        const maxScore = Math.max(...scores, 1);
+        // Normalizza in range 40–100, media target ~67 (= 1000/15)
+        return players.map((p, i) => {
+            const normalized = scores[i] / maxScore; // 0..1
+            const price = Math.round(40 + normalized * 60); // 40..100
+            return { ...p, price };
+        });
+    }
+
+    function getPlayerPhoto(playerName) {
+        const key = (playerName||"").normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-zA-Z0-9]+/g,'_').replace(/^_|_$/g,'').toUpperCase();
+        // Cerca match esatto o parziale
+        if (BRC_PLAYER_PHOTOS[key]) return BRC_PLAYER_PHOTOS[key];
+        // Cerca match per nome parziale
+        const keys = Object.keys(BRC_PLAYER_PHOTOS);
+        const found = keys.find(k => k.includes(key.split('_')[0]) && k.includes(key.split('_').slice(-1)[0]));
+        return found ? BRC_PLAYER_PHOTOS[found] : null;
+    }
+
+    function FantasyModule({ players, tx, user, db, collection, doc, setDoc, getDocs, onSnapshot, query, orderBy }) {
+        const [myTeam, setMyTeam] = useState([]);
+        const [teamName, setTeamName] = useState("La Mia Squadra");
+        const [filterRole, setFilterRole] = useState("");
+        const [sortBy, setSortBy] = useState("price");
+        const [searchQ, setSearchQ] = useState("");
+        const [view, setView] = useState("market"); // market | myteam | leaderboard
+        const [savedTeams, setSavedTeams] = useState([]);
+        const [saving, setSaving] = useState(false);
+        const [fantasyTeams, setFantasyTeams] = useState([]);
+
+        // Calcola statistiche per ogni giocatore
+        const enrichedPlayers = useMemo(() => {
+            const map = new Map();
+            for (const t of tx) {
+                if (!t.playerId) continue;
+                const cur = map.get(t.playerId) || { points: 0, count: 0, mete: 0, presenze: 0 };
+                cur.points += Number(t.delta) || 0;
+                cur.count += 1;
+                if (t.eventId && t.eventId.includes("META")) cur.mete += (t.quantity||1);
+                if (t.eventId && (t.eventId.includes("PRESENZ") || t.eventId.includes("PARTITA"))) cur.presenze += 1;
+                map.set(t.playerId, cur);
+            }
+            const withStats = players.map(p => {
+                const stats = map.get(p.id) || { points: 0, count: 0, mete: 0, presenze: 0 };
+                const team = TEAM_LIST.find(t => t.id === p.teamId);
+                const photo = p.photoUrl || getPlayerPhoto(p.name);
+                return { ...p, ...stats, teamColor: team?.color || "#888", teamName: team?.name || "N/A", photo };
+            });
+            // Prezzi normalizzati relativi al gruppo
+            const priced = calcFantasyPrices(withStats, map);
+            return priced;
+        }, [players, tx]);
+
+        const budget = useMemo(() => {
+            const spent = myTeam.reduce((acc, pid) => {
+                const p = enrichedPlayers.find(x => x.id === pid);
+                return acc + (p?.price || 0);
+            }, 0);
+            return Math.round((FANTASY_BUDGET - spent) * 10) / 10;
+        }, [myTeam, enrichedPlayers]);
+
+        const myTeamPlayers = useMemo(() => myTeam.map(pid => enrichedPlayers.find(p => p.id === pid)).filter(Boolean), [myTeam, enrichedPlayers]);
+        const myTeamPoints = useMemo(() => myTeamPlayers.reduce((acc, p) => acc + p.points, 0), [myTeamPlayers]);
+
+        // Carica classifiche fantasy da Firestore
+        useEffect(() => {
+            const q = query(collection(db, "fantasy_teams"), orderBy("points", "desc"));
+            const unsub = onSnapshot(q, snap => {
+                setFantasyTeams(snap.docs.map(d => ({ fid: d.id, ...d.data() })));
+            }, () => {});
+            return unsub;
+        }, []);
+
+        // Carica il team salvato dell'utente corrente
+        useEffect(() => {
+            if (!user?.email) return;
+            const key = user.email.replace(/[^a-zA-Z0-9]/g, "_");
+            const unsub = onSnapshot(doc(db, "fantasy_teams", key), snap => {
+                if (snap.exists()) {
+                    const data = snap.data();
+                    setMyTeam(data.playerIds || []);
+                    setTeamName(data.teamName || "La Mia Squadra");
+                }
+            }, () => {});
+            return unsub;
+        }, [user]);
+
+        async function saveTeam() {
+            if (!user?.email) return alert("Devi accedere per salvare la squadra!");
+            setSaving(true);
+            try {
+                const key = user.email.replace(/[^a-zA-Z0-9]/g, "_");
+                const totalPoints = myTeamPlayers.reduce((acc, p) => acc + p.points, 0);
+                await setDoc(doc(db, "fantasy_teams", key), {
+                    teamName,
+                    playerIds: myTeam,
+                    points: totalPoints,
+                    budget: budget,
+                    userEmail: user.email,
+                    updatedAt: new Date().toISOString(),
+                });
+                alert("Squadra salvata! 🏉");
+            } catch(e) { alert("Errore: " + e.message); }
+            setSaving(false);
+        }
+
+        // Mappa slotKey → playerId per i giocatori già selezionati
+        const filledSlots = useMemo(() => {
+            const map = {};
+            for (const pid of myTeam) {
+                const p = enrichedPlayers.find(x => x.id === pid);
+                if (!p?.fantasyPosition) continue;
+                const compatible = POSITION_COMPATIBILITY[p.fantasyPosition] || [p.fantasyPosition];
+                // Trova il primo slot compatibile non ancora occupato
+                for (const slotKey of compatible) {
+                    if (!map[slotKey]) { map[slotKey] = pid; break; }
+                }
+            }
+            return map;
+        }, [myTeam, enrichedPlayers]);
+
+        // Slot liberi per posizione
+        const freeSlots = useMemo(() => {
+            return FANTASY_POSITIONS.filter(fp => !filledSlots[fp.key]);
+        }, [filledSlots]);
+
+        function togglePlayer(playerId) {
+            const p = enrichedPlayers.find(x => x.id === playerId);
+            if (!p) return;
+            if (myTeam.includes(playerId)) {
+                setMyTeam(t => t.filter(id => id !== playerId));
+                return;
+            }
+            // Controlla posizione
+            if (!p.fantasyPosition) {
+                return alert(`${p.name} non ha una posizione Fantasy assegnata.\nL'admin deve configurarla prima.`);
+            }
+            // Controlla se c'è uno slot compatibile libero
+            const compatible = POSITION_COMPATIBILITY[p.fantasyPosition] || [p.fantasyPosition];
+            const hasSlot = compatible.some(slotKey => !filledSlots[slotKey]);
+            if (!hasSlot) {
+                const pos = FANTASY_POSITIONS.find(fp => fp.key === p.fantasyPosition);
+                return alert(`Slot ${pos?.label || p.fantasyPosition} già occupato!\nRimuovi prima il giocatore in quella posizione.`);
+            }
+            if (myTeam.length >= MAX_TEAM_SIZE) return alert(`Puoi avere massimo ${MAX_TEAM_SIZE} giocatori!`);
+            if (budget < p.price) return alert(`Budget insufficiente! Ti mancano ${(p.price - budget)} crediti.`);
+            setMyTeam(t => [...t, playerId]);
+        }
+
+        const filteredPlayers = useMemo(() => {
+            let list = [...enrichedPlayers];
+            if (searchQ) list = list.filter(p => p.name.toLowerCase().includes(searchQ.toLowerCase()));
+            if (filterRole) list = list.filter(p => {
+                const compatible = POSITION_COMPATIBILITY[p.fantasyPosition] || [];
+                return p.fantasyPosition === filterRole || compatible.includes(filterRole);
+            });
+            if (sortBy === "price") list.sort((a, b) => b.price - a.price);
+            else if (sortBy === "points") list.sort((a, b) => b.points - a.points);
+            else if (sortBy === "name") list.sort((a, b) => a.name.localeCompare(b.name));
+            return list;
+        }, [enrichedPlayers, searchQ, sortBy, filterRole]);
+
+        return (
+            <section className="space-y-4 pb-4">
+                {/* Header Fantasy */}
+                <div className="bg-gradient-to-r from-purple-900 via-indigo-900 to-blue-900 rounded-2xl p-4 border border-purple-700/50">
+                    <div className="flex items-center justify-between mb-2">
+                        <div>
+                            <h2 className="text-xl font-bold text-white">🏉 Fantasy BRC</h2>
+                            <p className="text-purple-300 text-sm">Costruisci la tua squadra dei sogni</p>
+                        </div>
+                        <div className="text-right">
+                            <div className="text-2xl font-bold text-yellow-400">💰 {budget}</div>
+                            <div className="text-xs text-gray-400">crediti rimasti</div>
+                        </div>
+                    </div>
+                    <div className="flex gap-3 text-sm mt-1">
+                        <span className="bg-purple-800/60 px-2 py-1 rounded-lg text-purple-200">👥 {myTeam.length}/{MAX_TEAM_SIZE}</span>
+                        <span className="bg-indigo-800/60 px-2 py-1 rounded-lg text-indigo-200">⭐ {myTeamPoints.toFixed(1)} pt totali</span>
+                        <span className="bg-blue-800/60 px-2 py-1 rounded-lg text-blue-200">Budget: {FANTASY_BUDGET}</span>
+                    </div>
+                </div>
+
+                {/* Navigazione sub-tab — solo Costruttore e Classifica */}
+                <div className="flex gap-1 border-b border-gray-700">
+                    <button onClick={() => setView("builder")} className={`px-4 py-2 text-sm font-medium transition-colors ${view === "builder" ? "border-b-2 border-purple-400 text-purple-400" : "text-gray-400 hover:text-gray-200"}`}>
+                        🏗 Costruisci
+                    </button>
+                    <button onClick={() => setView("leaderboard")} className={`px-4 py-2 text-sm font-medium transition-colors ${view === "leaderboard" ? "border-b-2 border-purple-400 text-purple-400" : "text-gray-400 hover:text-gray-200"}`}>
+                        🏆 Classifica
+                    </button>
+                    {/* Nome squadra + salva — sempre visibile nel costruttore */}
+                    {view === "builder" && (
+                        <div className="flex gap-1 items-center ml-auto pr-1">
+                            <input
+                                value={teamName}
+                                onChange={e => setTeamName(e.target.value)}
+                                className="w-28 px-2 py-1 rounded-lg bg-gray-800 text-xs"
+                                placeholder="Nome squadra"
+                            />
+                            <button onClick={saveTeam} disabled={saving || !user}
+                                className={`px-3 py-1 rounded-lg text-xs font-medium ${user ? "bg-purple-600 hover:bg-purple-500" : "bg-gray-700 text-gray-500 cursor-not-allowed"}`}>
+                                {saving ? "…" : !user ? "🔒" : "💾"}
+                            </button>
+                        </div>
+                    )}
+                </div>
+
+                {/* ===== COSTRUTTORE: split-screen ===== */}
+                {view === "builder" && (
+                    <div className="flex flex-col md:flex-row gap-3" style={{minHeight: '70vh'}}>
+
+                        {/* ── COLONNA SINISTRA: Mercato ── */}
+                        <div className="flex flex-col gap-2 md:w-1/2 md:overflow-y-auto" style={{maxHeight: '78vh'}}>
+
+                            {/* Filtri posizioni libere */}
+                            {freeSlots.length > 0 && (
+                                <div className="bg-gray-900/80 rounded-xl p-2 border border-gray-700 flex-shrink-0">
+                                    <p className="text-xs text-gray-400 mb-1.5 font-semibold">Slot liberi — filtra per ruolo:</p>
+                                    <div className="flex flex-wrap gap-1">
+                                        {freeSlots.map(fp => (
+                                            <button key={fp.key}
+                                                onClick={() => setFilterRole(filterRole === fp.key ? "" : fp.key)}
+                                                className={`text-xs px-2 py-0.5 rounded-lg border transition-all ${filterRole === fp.key ? "bg-purple-600 border-purple-500 text-white" : "bg-gray-800 border-gray-600 text-gray-300 hover:border-purple-500"}`}
+                                            >#{fp.short} {fp.label}</button>
+                                        ))}
+                                        {filterRole && <button onClick={() => setFilterRole("")} className="text-xs text-gray-500 hover:text-gray-300 pl-1">✕</button>}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Barra ricerca + ordinamento */}
+                            <div className="flex gap-1.5 flex-shrink-0">
+                                <input value={searchQ} onChange={e => setSearchQ(e.target.value)}
+                                    placeholder="Cerca…" className="flex-1 min-w-0 px-3 py-1.5 rounded-xl bg-gray-800 text-sm"/>
+                                <select value={sortBy} onChange={e => setSortBy(e.target.value)}
+                                    className="px-2 py-1.5 rounded-xl bg-gray-800 text-xs">
+                                    <option value="price">💰 Prezzo</option>
+                                    <option value="points">⭐ Punti</option>
+                                    <option value="name">A-Z</option>
+                                </select>
+                            </div>
+
+                            {/* Lista giocatori — card compatte */}
+                            <div className="flex flex-col gap-1.5 overflow-y-auto flex-1 pr-0.5">
+                                {filteredPlayers.map(p => {
+                                    const inTeam = myTeam.includes(p.id);
+                                    const canAfford = budget >= p.price || inTeam;
+                                    const posInfo = FANTASY_POSITIONS.find(fp => fp.key === p.fantasyPosition);
+                                    const compatible = POSITION_COMPATIBILITY[p.fantasyPosition] || [];
+                                    const slotFull = !inTeam && p.fantasyPosition && compatible.every(sk => filledSlots[sk] && filledSlots[sk] !== p.id);
+                                    const noPos = !p.fantasyPosition;
+                                    const blocked = slotFull || noPos;
+                                    return (
+                                        <div key={p.id}
+                                            onClick={() => !blocked && togglePlayer(p.id)}
+                                            className={`flex items-center gap-2 px-2 py-2 rounded-xl border transition-all cursor-pointer select-none
+                                                ${inTeam ? "border-purple-500 bg-purple-900/25" :
+                                                  blocked ? "border-gray-800 opacity-40 cursor-not-allowed" :
+                                                  !canAfford ? "border-gray-800 opacity-60 cursor-not-allowed" :
+                                                  "border-gray-800 bg-gray-900 hover:border-purple-600 hover:bg-purple-900/10 active:scale-95"}`}
+                                        >
+                                            {/* Foto piccola */}
+                                            <div className="relative flex-shrink-0">
+                                                <div className="w-10 h-10 rounded-lg overflow-hidden bg-gray-700 flex items-center justify-center">
+                                                    {p.photo
+                                                        ? <img src={p.photo} alt={p.name} className="w-full h-full object-cover object-top" onError={e=>{e.target.style.display='none';}}/>
+                                                        : <span className="text-lg">🏉</span>
+                                                    }
+                                                </div>
+                                                {posInfo && (
+                                                    <div className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-gray-900 border border-gray-600 flex items-center justify-center text-gray-300 font-bold" style={{fontSize:'0.55rem'}}>{posInfo.short}</div>
+                                                )}
+                                            </div>
+                                            {/* Info */}
+                                            <div className="flex-1 min-w-0">
+                                                <div className="text-xs font-semibold text-white truncate">{p.name}</div>
+                                                <div className="flex items-center gap-1 mt-0.5">
+                                                    {posInfo
+                                                        ? <span className="text-xs text-emerald-400">#{posInfo.short} {posInfo.label}</span>
+                                                        : <span className="text-xs text-amber-400">⚠️ No pos.</span>
+                                                    }
+                                                </div>
+                                                <div className="text-xs text-gray-500 mt-0.5">⭐{p.points.toFixed(0)} pt · {p.count} ev.</div>
+                                            </div>
+                                            {/* Prezzo + azione */}
+                                            <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                                                <span className="text-yellow-400 font-bold text-sm">💰{p.price}</span>
+                                                <span className={`text-xs px-2 py-0.5 rounded-lg font-medium ${
+                                                    inTeam ? "bg-red-700/80 text-white" :
+                                                    noPos ? "bg-gray-700 text-gray-500" :
+                                                    slotFull ? "bg-gray-700 text-gray-500" :
+                                                    !canAfford ? "bg-gray-700 text-gray-500" :
+                                                    "bg-purple-700/80 text-white"
+                                                }`}>
+                                                    {inTeam ? "✓ Nel team" : noPos ? "No pos." : slotFull ? "Pieno" : !canAfford ? "Costoso" : "+ Aggiungi"}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+
+                        {/* ── COLONNA DESTRA: Campo + stats ── */}
+                        <div className="flex flex-col gap-2 md:w-1/2 md:sticky md:top-0">
+                            {/* Mini stats bar */}
+                            <div className="grid grid-cols-3 gap-1.5 flex-shrink-0">
+                                <div className="bg-gray-900 rounded-xl px-2 py-2 text-center border border-gray-800">
+                                    <div className="text-base font-bold text-purple-400">{myTeam.length}<span className="text-xs text-gray-600">/{MAX_TEAM_SIZE}</span></div>
+                                    <div className="text-xs text-gray-500">Giocatori</div>
+                                </div>
+                                <div className="bg-gray-900 rounded-xl px-2 py-2 text-center border border-gray-800">
+                                    <div className="text-base font-bold text-yellow-400">💰{budget}</div>
+                                    <div className="text-xs text-gray-500">Rimasti</div>
+                                </div>
+                                <div className="bg-gray-900 rounded-xl px-2 py-2 text-center border border-gray-800">
+                                    <div className="text-base font-bold text-emerald-400">⭐{myTeamPoints.toFixed(0)}</div>
+                                    <div className="text-xs text-gray-500">Punti</div>
+                                </div>
+                            </div>
+
+                            {/* Campo rugby */}
+                            <div className="flex-1">
+                                <RugbyPitch players={myTeamPlayers} onRemove={togglePlayer} />
+                            </div>
+
+                            {!user && <p className="text-amber-400 text-xs text-center">🔒 Accedi per salvare la squadra</p>}
+                        </div>
+                    </div>
+                )}
+
+                {/* CLASSIFICA FANTASY */}
+                {view === "leaderboard" && (
+                    <div className="space-y-3">
+                        <h3 className="text-lg font-semibold">🏆 Classifica Fantasy</h3>
+                        {fantasyTeams.length === 0 ? (
+                            <div className="text-center py-10 text-gray-400">
+                                <div className="text-4xl mb-2">🏆</div>
+                                <p>Nessuna squadra salvata ancora.</p>
+                                <p className="text-sm">Crea la tua e scala la classifica!</p>
+                            </div>
+                        ) : (
+                            <div className="space-y-2">
+                                {fantasyTeams.map((team, idx) => (
+                                    <div key={team.fid} className={`bg-gray-900 rounded-xl p-3 border flex items-center gap-3 ${idx === 0 ? "border-yellow-500/50" : idx === 1 ? "border-gray-400/50" : idx === 2 ? "border-orange-700/50" : "border-gray-800"}`}>
+                                        <div className={`text-2xl font-bold w-8 text-center ${idx === 0 ? "text-yellow-400" : idx === 1 ? "text-gray-300" : idx === 2 ? "text-orange-500" : "text-gray-500"}`}>
+                                            {idx === 0 ? "🥇" : idx === 1 ? "🥈" : idx === 2 ? "🥉" : `#${idx+1}`}
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="font-semibold text-sm truncate">{team.teamName}</div>
+                                            <div className="text-xs text-gray-400">{team.userEmail}</div>
+                                        </div>
+                                        <div className="text-right flex-shrink-0">
+                                            <div className="text-emerald-400 font-bold">⭐ {(team.points||0).toFixed(1)}</div>
+                                            <div className="text-xs text-gray-500">💰 {(team.budget||0).toFixed(1)} rim.</div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                )}
+            </section>
+        );
+    }
+
+    // ======== CANCHA DE RUGBY ========
+    // Formation 3-4-1-3-4 (standard 15-a-side rugby)
+    // Positions on the pitch (x%, y%) from top (kickoff end) to bottom (own half)
+    // Rugby union standard: 1-fullback at back, then 2 wings+2 centres, fly-half+scrum-half, then forwards
+    // We render field top=attack, bottom=own goal. 15 slots assigned by index order selected.
+
+    const PITCH_ROWS = [
+        { label: "Trequarti", slots: [
+            { key: "ala_sx",   x: 15,  y: 84 },
+            { key: "estremo",  x: 50,  y: 89 },
+            { key: "ala_dx",   x: 85,  y: 84 },
+        ]},
+        { label: "Centri", slots: [
+            { key: "centro_sx", x: 35,  y: 73 },
+            { key: "centro_dx", x: 65,  y: 73 },
+        ]},
+        { label: "Mediani", slots: [
+            { key: "apertura", x: 38,  y: 62 },
+            { key: "mischia",  x: 62,  y: 62 },
+        ]},
+        { label: "Terza linea", slots: [
+            { key: "flanker_sx", x: 25,  y: 50 },
+            { key: "numero8",    x: 50,  y: 52 },
+            { key: "flanker_dx", x: 75,  y: 50 },
+        ]},
+        { label: "Seconda linea", slots: [
+            { key: "seconda_a", x: 38,  y: 38 },
+            { key: "seconda_b", x: 62,  y: 38 },
+        ]},
+        { label: "Prima linea", slots: [
+            { key: "pilone_sx",   x: 28,  y: 26 },
+            { key: "tallonatore", x: 50,  y: 24 },
+            { key: "pilone_dx",   x: 72,  y: 26 },
+        ]},
+    ];
+
+    const ALL_SLOTS = PITCH_ROWS.flatMap(r => r.slots);
+
+    function RugbyPitch({ players, onRemove }) {
+        const [hovered, setHovered] = useState(null);
+
+        // Build map: slotKey → player (using compatibility)
+        const slotMap = useMemo(() => {
+            const map = {};
+            const usedPlayers = new Set();
+            // First pass: exact match
+            for (const slot of ALL_SLOTS) {
+                const exact = players.find(p => p.fantasyPosition === slot.key && !usedPlayers.has(p.id));
+                if (exact) { map[slot.key] = exact; usedPlayers.add(exact.id); }
+            }
+            // Second pass: compatible match for remaining players
+            for (const slot of ALL_SLOTS) {
+                if (map[slot.key]) continue;
+                const compatible = players.find(p =>
+                    !usedPlayers.has(p.id) &&
+                    (POSITION_COMPATIBILITY[p.fantasyPosition] || []).includes(slot.key)
+                );
+                if (compatible) { map[slot.key] = compatible; usedPlayers.add(compatible.id); }
+            }
+            // Third pass: any remaining player fills any empty slot
+            for (const slot of ALL_SLOTS) {
+                if (map[slot.key]) continue;
+                const any = players.find(p => !usedPlayers.has(p.id));
+                if (any) { map[slot.key] = any; usedPlayers.add(any.id); }
+            }
+            return map;
+        }, [players]);
+
+        return (
+            <div className="rounded-2xl overflow-hidden border border-green-800/50 shadow-xl" style={{background: 'linear-gradient(180deg, #14532d 0%, #166534 50%, #15803d 100%)'}}>
+                <div className="text-center pt-2 pb-1 text-green-300 text-xs font-semibold tracking-widest uppercase opacity-70">
+                    {players.length}/15 giocatori
+                </div>
+
+                <div className="relative w-full" style={{paddingBottom: '95%'}}>
+                    <svg
+                        viewBox="0 0 100 100"
+                        className="absolute inset-0 w-full h-full"
+                        xmlns="http://www.w3.org/2000/svg"
+                        preserveAspectRatio="xMidYMid meet"
+                    >
+                        {/* Strisce campo */}
+                        {[0,1,2,3,4,5,6,7,8,9].map(i => (
+                            <rect key={i} x="0" y={i*10} width="100" height="5" fill={i%2===0?"#166534":"#15803d"} opacity="0.5"/>
+                        ))}
+
+                        {/* Bordi */}
+                        <line x1="2" y1="2" x2="98" y2="2" stroke="#86efac" strokeWidth="0.4" opacity="0.6"/>
+                        <line x1="2" y1="98" x2="98" y2="98" stroke="#86efac" strokeWidth="0.4" opacity="0.6"/>
+                        <line x1="2" y1="2" x2="2" y2="98" stroke="#86efac" strokeWidth="0.4" opacity="0.6"/>
+                        <line x1="98" y1="2" x2="98" y2="98" stroke="#86efac" strokeWidth="0.4" opacity="0.6"/>
+
+                        {/* Linee try */}
+                        <line x1="2" y1="8" x2="98" y2="8" stroke="#fff" strokeWidth="0.6" opacity="0.9"/>
+                        <line x1="2" y1="92" x2="98" y2="92" stroke="#fff" strokeWidth="0.6" opacity="0.9"/>
+
+                        {/* 22m */}
+                        <line x1="2" y1="25" x2="98" y2="25" stroke="#bbf7d0" strokeWidth="0.3" strokeDasharray="2,2" opacity="0.4"/>
+                        <line x1="2" y1="75" x2="98" y2="75" stroke="#bbf7d0" strokeWidth="0.3" strokeDasharray="2,2" opacity="0.4"/>
+
+                        {/* Metà campo */}
+                        <line x1="2" y1="50" x2="98" y2="50" stroke="#fff" strokeWidth="0.5" opacity="0.7"/>
+                        <circle cx="50" cy="50" r="0.8" fill="none" stroke="#fff" strokeWidth="0.3" opacity="0.5"/>
+
+                        {/* Pali alti */}
+                        <line x1="43" y1="2" x2="43" y2="8" stroke="#fbbf24" strokeWidth="0.6" opacity="0.9"/>
+                        <line x1="57" y1="2" x2="57" y2="8" stroke="#fbbf24" strokeWidth="0.6" opacity="0.9"/>
+                        <line x1="43" y1="5" x2="57" y2="5" stroke="#fbbf24" strokeWidth="0.4" opacity="0.9"/>
+
+                        {/* Pali bassi */}
+                        <line x1="43" y1="92" x2="43" y2="98" stroke="#fbbf24" strokeWidth="0.6" opacity="0.9"/>
+                        <line x1="57" y1="92" x2="57" y2="98" stroke="#fbbf24" strokeWidth="0.6" opacity="0.9"/>
+                        <line x1="43" y1="95" x2="57" y2="95" stroke="#fbbf24" strokeWidth="0.4" opacity="0.9"/>
+
+                        {/* Labels linee */}
+                        <text x="3" y="7.5" fontSize="2" fill="#fff" opacity="0.4">IN GOAL</text>
+                        <text x="3" y="49.5" fontSize="2" fill="#fff" opacity="0.4">50m</text>
+                        <text x="3" y="91.5" fontSize="2" fill="#fff" opacity="0.4">IN GOAL</text>
+
+                        {/* Slot vuoti + giocatori */}
+                        {ALL_SLOTS.map((slot) => {
+                            const player = slotMap[slot.key];
+                            const posInfo = FANTASY_POSITIONS.find(fp => fp.key === slot.key);
+                            const R = 5;
+                            const isHov = hovered === slot.key;
+                            const clipId = `clip-${slot.key}`;
+
+                            if (!player) {
+                                return (
+                                    <g key={`empty-${slot.key}`}>
+                                        <circle cx={slot.x} cy={slot.y} r={R}
+                                            fill="rgba(0,0,0,0.2)"
+                                            stroke="rgba(255,255,255,0.2)"
+                                            strokeWidth="0.4" strokeDasharray="1.2,1.2"/>
+                                        <text x={slot.x} y={slot.y - 0.3} textAnchor="middle" dominantBaseline="middle"
+                                            fontSize="2.2" fill="rgba(255,255,255,0.35)" fontWeight="bold">{posInfo?.short}</text>
+                                        <rect x={slot.x-7} y={slot.y+R+0.3} width="14" height="3" rx="1.2"
+                                            fill="rgba(0,0,0,0.4)"/>
+                                        <text x={slot.x} y={slot.y+R+2.2} textAnchor="middle" fontSize="1.7"
+                                            fill="rgba(255,255,255,0.3)">{posInfo?.label?.substring(0,10)}</text>
+                                    </g>
+                                );
+                            }
+
+                            return (
+                                <g key={`player-${slot.key}`}
+                                    style={{cursor:'pointer'}}
+                                    onMouseEnter={() => setHovered(slot.key)}
+                                    onMouseLeave={() => setHovered(null)}
+                                    onClick={() => onRemove(player.id)}
+                                >
+                                    <defs>
+                                        <clipPath id={clipId}>
+                                            <circle cx={slot.x} cy={slot.y} r={R - 0.2}/>
+                                        </clipPath>
+                                    </defs>
+                                    <circle cx={slot.x+0.2} cy={slot.y+0.4} r={R} fill="rgba(0,0,0,0.35)"/>
+                                    <circle cx={slot.x} cy={slot.y} r={R}
+                                        fill={isHov ? "#7c3aed" : "#1e1b4b"}
+                                        stroke={isHov ? "#a78bfa" : "#6d28d9"}
+                                        strokeWidth={isHov ? "0.8" : "0.5"}/>
+                                    {player.photo ? (
+                                        <image href={player.photo}
+                                            x={slot.x-(R-0.2)} y={slot.y-(R-0.2)}
+                                            width={(R-0.2)*2} height={(R-0.2)*2}
+                                            clipPath={`url(#${clipId})`}
+                                            preserveAspectRatio="xMidYMin slice"/>
+                                    ) : (
+                                        <text x={slot.x} y={slot.y+1} textAnchor="middle"
+                                            dominantBaseline="middle" fontSize="4">🏉</text>
+                                    )}
+                                    {/* Numero posizione */}
+                                    <circle cx={slot.x+R-1.2} cy={slot.y+R-1.2} r="1.8"
+                                        fill="#1e1b4b" stroke="#6d28d9" strokeWidth="0.3"/>
+                                    <text x={slot.x+R-1.2} y={slot.y+R-0.6}
+                                        textAnchor="middle" dominantBaseline="middle"
+                                        fontSize="1.7" fill="#c4b5fd" fontWeight="bold">{posInfo?.short}</text>
+                                    {/* Nome */}
+                                    <rect x={slot.x-8} y={slot.y+R+0.4} width="16" height="3.2" rx="1.2"
+                                        fill="rgba(0,0,0,0.75)"/>
+                                    <text x={slot.x} y={slot.y+R+2.3} textAnchor="middle"
+                                        fontSize="1.85" fill="#e2e8f0" fontWeight="600">
+                                        {(() => {
+                                            const parts = player.name.split(' ');
+                                            return parts.length > 1 ? `${parts[0][0]}. ${parts.slice(1).join(' ')}`.substring(0,11) : player.name.substring(0,11);
+                                        })()}
+                                    </text>
+                                    {/* X on hover */}
+                                    {isHov && (
+                                        <g>
+                                            <circle cx={slot.x-R+1.2} cy={slot.y-R+1.2} r="2"
+                                                fill="#dc2626" stroke="#fff" strokeWidth="0.25"/>
+                                            <text x={slot.x-R+1.2} y={slot.y-R+1.8}
+                                                textAnchor="middle" dominantBaseline="middle"
+                                                fontSize="2.5" fill="#fff" fontWeight="bold">×</text>
+                                        </g>
+                                    )}
+                                </g>
+                            );
+                        })}
+                    </svg>
+                </div>
+
+                <div className="px-3 pb-2 text-center text-xs text-green-400 opacity-50">
+                    Tocca un giocatore per rimuoverlo
+                </div>
+            </div>
+        );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+
+</body>
+</html>
