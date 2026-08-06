@@ -1,0 +1,90 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helpers ───────────────────────────────────────────────
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // get() se cachea dentro de una misma evaluación, así que
+    // llamar a estas funciones varias veces no multiplica lecturas.
+    function me() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    function myRole() { return me().role; }
+    function myClub() { return me().clubId; }
+
+    function isAdmin() {
+      return isSignedIn() && myRole() in ['admin', 'super_admin'];
+    }
+    function isStaff() {
+      return isSignedIn() && myRole() in ['admin', 'super_admin', 'cuerpo_tecnico'];
+    }
+
+    // El documento existente pertenece a mi club
+    function inMyClub() {
+      return isSignedIn() && resource.data.clubId == myClub();
+    }
+    // El documento que estoy por escribir queda en mi club
+    function writesToMyClub() {
+      return isSignedIn() && request.resource.data.clubId == myClub();
+    }
+    // Campos que el cliente NO puede modificar en un update
+    function keepsImmutable(fields) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasAny(fields) == false;
+    }
+
+    // ── users ─────────────────────────────────────────────────
+    match /users/{uid} {
+      allow read: if isSignedIn() && (request.auth.uid == uid || inMyClub());
+
+      // Auto-registro: el rol queda FORZADO a 'jugador'.
+      // Un usuario no puede elegir su propio rol al crearse.
+      allow create: if isSignedIn()
+                    && request.auth.uid == uid
+                    && request.resource.data.uid == uid
+                    && request.resource.data.email == request.auth.token.email
+                    && request.resource.data.role == 'jugador';
+
+      // Editar mi propio perfil, pero sin tocar rol ni club.
+      allow update: if isSignedIn()
+                    && request.auth.uid == uid
+                    && keepsImmutable(['role', 'clubId', 'uid']);
+
+      // Un admin gestiona roles solo dentro de su club, y no puede
+      // fabricar super_admins ni mover gente a otro club.
+      allow update: if isAdmin()
+                    && inMyClub()
+                    && writesToMyClub()
+                    && request.resource.data.role in ['admin', 'cuerpo_tecnico', 'jugador'];
+
+      allow delete: if isAdmin() && inMyClub() && request.auth.uid != uid;
+    }
+
+    // ── Datos del club ────────────────────────────────────────
+    // Sin catch-all: cada colección declarada explícitamente.
+    match /players/{id}         { allow read: if inMyClub(); allow create: if isStaff() && writesToMyClub(); allow update, delete: if isStaff() && inMyClub(); }
+    match /eventos/{id}         { allow read: if inMyClub(); allow create: if isStaff() && writesToMyClub(); allow update, delete: if isStaff() && inMyClub(); }
+    match /news/{id}            { allow read: if inMyClub(); allow create: if isStaff() && writesToMyClub(); allow update, delete: if isStaff() && inMyClub(); }
+    match /messages/{id}        { allow read: if inMyClub(); allow create: if isStaff() && writesToMyClub(); allow update, delete: if isStaff() && inMyClub(); }
+    match /matches/{id}         { allow read: if inMyClub(); allow create: if isStaff() && writesToMyClub(); allow update, delete: if isStaff() && inMyClub(); }
+    match /routines/{id}        { allow read: if inMyClub(); allow create: if isStaff() && writesToMyClub(); allow update, delete: if isStaff() && inMyClub(); }
+    match /nutrition_plans/{id} { allow read: if inMyClub(); allow create: if isStaff() && writesToMyClub(); allow update, delete: if isStaff() && inMyClub(); }
+    match /convocatorias/{id}   { allow read: if inMyClub(); allow create: if isStaff() && writesToMyClub(); allow update, delete: if isStaff() && inMyClub(); }
+
+    // ── lesiones: dato sensible de salud ──────────────────────
+    // Solo cuerpo técnico y el propio jugador afectado.
+    match /lesiones/{id} {
+      allow read: if (isStaff() && inMyClub())
+                  || (isSignedIn() && inMyClub() && resource.data.playerId == request.auth.uid);
+      allow create: if isStaff() && writesToMyClub();
+      allow update, delete: if isStaff() && inMyClub();
+    }
+
+    // Todo lo no declarado arriba queda cerrado por defecto.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

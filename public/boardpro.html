@@ -1,0 +1,2057 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1, viewport-fit=cover" name="viewport"/>
+<title>RugbyBoard Pro - Lavagna Tattica</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='0.9em' font-size='90'%3E🏉%3C/text%3E%3C/svg%3E">
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet"/>
+<style>
+        :root {
+            --sidebar-w: 360px;
+            --player-size: 40px;
+            --player-font: 14px;
+            --blue: #0d6efd;
+            --red: #e63946;
+            --ink: #e6edf3;
+            --panel: #0f1720;
+            --panel-2: #111923;
+            --border: #1f2a36;
+            --shadow: 0 4px 16px rgba(0,0,0,.25);
+            --grid: rgba(255,255,255,.08);
+            --yellow: #ffd400;
+            --accent: #c8ff00;
+            --accent2: #a8d900;
+            --warn: #ffd400;
+        }
+
+        * { box-sizing: border-box; }
+        html, body { height: 100%; margin: 0; background: #0b1720; color: var(--ink); font-family: system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Arial,"Noto Sans",sans-serif; }
+        .app { height: 100dvh; display: grid; grid-template-columns: var(--sidebar-w) 1fr; }
+
+        .sidebar { 
+            background: var(--panel-2); 
+            border-right: 1px solid var(--border); 
+            padding: 16px; 
+            display: flex; 
+            flex-direction: column; 
+            gap: 12px; 
+            overflow-y: auto; 
+            z-index: 1000; 
+            -webkit-overflow-scrolling: touch; 
+        }
+        
+        .sidebar::-webkit-scrollbar { width: 6px; }
+        .sidebar::-webkit-scrollbar-track { background: var(--panel-2); }
+        .sidebar::-webkit-scrollbar-thumb { background: #263443; border-radius: 3px; }
+
+        .sidebar h1 { font-size: 18px; margin: 0 0 8px 0; }
+
+        .group { 
+            border: 1px solid var(--border); 
+            background: var(--panel); 
+            border-radius: 12px; 
+            padding: 12px; 
+            display: flex; 
+            flex-direction: column;
+            gap: 0;
+            transition: background 0.2s;
+        }
+        
+        .group-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            user-select: none;
+            padding-bottom: 0;
+        }
+        
+        .group:not(.closed) .group-header {
+            padding-bottom: 12px;
+        }
+
+        .group strong { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; opacity: .9; }
+        
+        .group-icon {
+            font-size: 12px;
+            opacity: 0.5;
+            transition: transform 0.3s ease;
+        }
+
+        .group-content {
+            display: grid;
+            gap: 10px;
+            overflow: hidden;
+        }
+
+        .group-content.collapsed {
+            display: none;
+        }
+
+        .group.closed .group-icon {
+            transform: rotate(-90deg);
+        }
+
+        .row { display: grid; gap: 8px; }
+
+        .btn, select, input[type="text"], input[type="number"], input[type="range"], label.chk, input[type="color"], textarea {
+            appearance: none;
+            border: 1px solid #263443;
+            background: #15202b;
+            color: var(--ink);
+            padding: .55rem .7rem;
+            border-radius: 10px;
+            box-shadow: var(--shadow);
+            font-size: 14px;
+        }
+        .btn { cursor: pointer; text-align: center; }
+        .btn:hover { filter: brightness(1.08); }
+        .btn.alt { background: #0e2235; }
+        .btn.primary { background: var(--accent); color: #000; font-weight: 600; }
+        .btn.danger { background: var(--red); color: #fff; }
+        .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+        .btn.active { background: var(--blue); border-color: var(--blue); }
+
+        small.note { opacity:.8 }
+        .legend { display:flex; align-items:center; gap:8px; font-size: 13px; }
+        .swatch { width: .9em; height: .9em; border-radius: 50%; display:inline-block; border:1px solid rgba(255,255,255,.7); }
+
+        .stage { position: relative; display: grid; place-items: center; padding: 16px; overflow: hidden; }
+        .board-viewport { position: relative; width:100%; height:100%; contain: layout paint; }
+        .board-wrap { position: absolute; width: 1200px; height: 700px; transform-origin: top left; }
+        .board { position: absolute; inset: 0; background: #137a46; overflow: hidden; border-radius: 18px; box-shadow: 0 10px 40px rgba(0,0,0,.4); }
+
+        .board::before {
+            content:""; position:absolute; inset:0; pointer-events:none;
+            background-image: linear-gradient(90deg, rgba(255,255,255,.02) 0 5%, transparent 5 10%, rgba(255,255,255,.02) 10 15%, transparent 15 20%, rgba(255,255,255,.02) 20 25%, transparent 25 30%, rgba(255,255,255,.02) 30 35%, transparent 35 40%, rgba(255,255,255,.02) 40 45%, transparent 45 50%, rgba(255,255,255,.02) 50 55%, transparent 55 60%, rgba(255,255,255,.02) 60 65%, transparent 65 70%, rgba(255,255,255,.02) 70 75%, transparent 75 80%, rgba(255,255,255,.02) 80 85%, transparent 85 90%, rgba(255,255,255,.02) 90 95%, transparent 95 100%);
+        }
+        .grid-overlay { position:absolute; inset:0; pointer-events:none; opacity:.6; display:none; }
+        .grid-overlay.active { display:block; }
+
+        .lines, #draw { position:absolute; inset:0; pointer-events:none; }
+        svg { width:100%; height:100%; display:block; }
+
+        body, #boardViewport, #boardWrap, #board, #players, #ball, #draw { touch-action:none; }
+
+        #players { position:absolute; inset:0; z-index:3; pointer-events:none; }
+        .player {
+            pointer-events:auto;
+            position:absolute;
+            width:40px;
+            height:40px;
+            border-radius:50%;
+            display:grid;
+            place-items:center;
+            font-weight:700;
+            font-size:14px;
+            color:#fff;
+            cursor:grab;
+            border:2px solid #fff;
+            box-shadow: var(--shadow);
+            background:#0d6efd;
+        }
+        .player.selected { border: 3px solid var(--accent); box-shadow: 0 0 10px var(--accent); }
+        .player:active, #ball:active { cursor: grabbing !important; }
+        
+        #ball { position:absolute; z-index:4; }
+
+        .ball { width:30px; height:15px; background: var(--yellow); border: 2px solid #fff; border-radius: 50% / 60%; transform: translate(-50%,-50%) rotate(-15deg); box-shadow: 0 3px 12px rgba(0,0,0,.35); cursor: grab; }
+        .ball::after { content:""; position:absolute; inset:6px 18px; border-radius:50% / 60%; border:2px dashed rgba(0,0,0,.25); }
+        .label { font-size:12px; font-weight:700; fill:#fff; text-shadow: 0 1px 2px rgba(0,0,0,.6); }
+
+        .team-logo {
+            position:absolute;
+            left:50%;
+            top:50%;
+            transform:translate(-50%,-50%);
+            width:180px;
+            max-width:25%;
+            opacity:0.18;
+            pointer-events:none;
+            filter: drop-shadow(0 0 10px rgba(0,0,0,.5));
+        }
+
+        .hamburger { 
+            position: fixed; 
+            top: calc(12px + env(safe-area-inset-top)); 
+            left: calc(12px + env(safe-area-inset-left)); 
+            width: 44px; 
+            height: 44px; 
+            display: none; 
+            place-items: center; 
+            font-size: 22px; 
+            border: 1px solid #263443; 
+            background: #15202b; 
+            color: var(--ink); 
+            border-radius: 10px; 
+            box-shadow: var(--shadow); 
+            z-index: 1100; 
+            cursor: pointer;
+        }
+        .close-drawer { 
+            display: none; 
+            position: sticky; 
+            top: 0; 
+            margin-left: auto; 
+            width: 36px; 
+            height: 36px; 
+            border: 1px solid #263443; 
+            background: #15202b; 
+            color: var(--ink); 
+            border-radius: 10px; 
+            box-shadow: var(--shadow); 
+            z-index: 1001; 
+            cursor: pointer; 
+            place-items: center;
+        }
+        .scrim { 
+            position: fixed; 
+            inset: 0; 
+            background: rgba(0,0,0,.45); 
+            opacity: 0; 
+            pointer-events: none; 
+            transition: opacity .2s ease; 
+            z-index: 900; 
+        }
+        .scrim.show { 
+            opacity: 1; 
+            pointer-events: auto; 
+        }
+
+        .login-overlay { 
+            position: fixed; 
+            inset: 0; 
+            background: #0b1720; 
+            display: flex; 
+            flex-direction: column; 
+            justify-content: center; 
+            align-items: center; 
+            z-index: 3000; 
+            padding: 20px;
+        }
+        .login-container {
+            background: var(--panel);
+            padding: 2rem;
+            border-radius: 12px;
+            box-shadow: var(--shadow);
+            border: 1px solid var(--border);
+            width: 100%;
+            max-width: 400px;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+        .login-header { text-align: center; margin-bottom: 1rem; }
+        .login-header h1 { color: var(--accent); margin: 0 0 0.5rem 0; font-size: 1.5rem; }
+        .login-header p { color: var(--ink); opacity: 0.8; margin: 0; }
+        .login-input {
+            width: 100%;
+            padding: 12px;
+            background: #0c1c2b;
+            color: var(--ink);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 14px;
+        }
+        .login-input:focus { outline: none; border-color: var(--accent); }
+        .auth-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .login-btn {
+            width: 100%;
+            padding: 12px;
+            background: var(--accent);
+            color: #000;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .login-btn.secondary { background: transparent; border: 1px solid var(--accent); color: var(--accent); }
+        .login-btn.secondary:hover { background: rgba(0, 194, 255, 0.1); }
+        .google-btn {
+            width: 100%;
+            padding: 12px;
+            background: #fff;
+            color: #333;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .google-btn:hover { filter: brightness(0.95); }
+        .login-btn:disabled, .google-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+        .separator { display: flex; align-items: center; text-align: center; color: var(--ink); opacity: 0.5; font-size: 12px; }
+        .separator::before, .separator::after { content: ''; flex: 1; border-bottom: 1px solid var(--border); }
+        .separator:not(:empty)::before { margin-right: .5em; }
+        .separator:not(:empty)::after { margin-left: .5em; }
+        .login-message { text-align: center; font-size: 0.85rem; margin: 0; min-height: 20px; }
+        .login-error { color: var(--red); }
+        .login-success { color: var(--accent2); }
+
+        .status-indicator { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 8px 12px; border-radius: 8px; background: var(--panel); border: 1px solid var(--border); }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+        .status-dot.offline { background: var(--warn); }
+        .status-dot.error { background: var(--red); }
+
+        .player-counter { display: flex; align-items: center; gap: 8px; font-size: 13px; opacity: 0.8; }
+
+        .firebase-status { padding: 8px 12px; border-radius: 8px; font-size: 12px; margin-top: 8px; display: none; }
+        .firebase-status.connected { background: rgba(126, 242, 154, 0.1); border: 1px solid var(--accent2); color: var(--accent2); display: block; }
+        .firebase-status.disconnected { background: rgba(230, 57, 70, 0.1); border: 1px solid var(--red); color: var(--red); display: block; }
+
+        .success-popup {
+            position: fixed; top: 20px; right: 20px; background: var(--accent2); color: #000;
+            padding: 16px 20px; border-radius: 10px; box-shadow: var(--shadow); z-index: 2000;
+            display: flex; align-items: center; gap: 10px; font-weight: 600;
+            transform: translateX(400px); transition: transform 0.3s ease;
+        }
+        .success-popup.show { transform: translateX(0); }
+        .success-popup.hide { transform: translateX(400px); }
+
+        .btn.selection-tool { background: var(--blue); border-color: var(--blue); }
+
+        body.presentation-mode .sidebar { display: none; }
+        body.presentation-mode .hamburger { display: none !important; }
+        body.presentation-mode .stage { padding: 0; }
+        body.presentation-mode .board-viewport { position: fixed; inset: 0; }
+
+        @media (max-width: 900px) {
+            :root { --sidebar-w: min(86vw, 420px); }
+            html, body { overflow: hidden; height: 100dvh; }
+            .app { grid-template-columns: 1fr; height: 100dvh; }
+            .sidebar { 
+                position: fixed; top: 0; left: 0; bottom: 0; width: var(--sidebar-w); 
+                transform: translateX(-105%); transition: transform .25s ease; 
+                padding-top: calc(12px + env(safe-area-inset-top)); z-index: 1000;
+            }
+            .sidebar.open { transform: translateX(0); }
+            .close-drawer { display: grid; }
+            .hamburger { display: grid; }
+            .stage { padding: 0; }
+            .board-viewport { position: fixed; top: 0; left: 0; right: 0; bottom: 0; overflow: hidden; background: #0b1720; }
+        }
+        @media (max-width: 900px) {
+            .hamburger { display: grid !important; }
+            .main-app-visible .hamburger { display: grid !important; }
+        }
+</style>
+</head>
+<body>
+
+<!-- SUCCESS POPUP -->
+<div class="success-popup" id="successPopup"><span>✅</span><span id="successMessage">Successo!</span></div>
+
+<!-- HAMBURGER -->
+<button aria-label="Apri pannello" class="hamburger" id="menuBtn">☰</button>
+
+<!-- SCRIM -->
+<div aria-hidden="true" class="scrim" id="scrim"></div>
+
+<!-- LOGIN -->
+<div class="login-overlay" id="loginOverlay">
+  <div class="login-container">
+    <div class="login-header">
+      <h1>RugbyBoard</h1>
+      <p data-i18n="login.subtitle">Accedi per utilizzare la lavagna</p>
+    </div>
+    <input class="login-input" id="loginEmail" placeholder="Email" type="email"/>
+    <input class="login-input" id="loginPassword" placeholder="Password" type="password"/>
+    <div class="auth-buttons">
+      <button class="login-btn" id="btnLogin" data-i18n="login.signin">Accedi</button>
+      <button class="login-btn secondary" id="btnRegister" data-i18n="login.signup">Registrati</button>
+    </div>
+    <div class="separator" data-i18n="login.or">o continua con</div>
+    <button class="google-btn" id="btnGoogle"><i class="fab fa-google"></i><span data-i18n="login.google">Google</span></button>
+    <p class="login-message" id="loginMessage"></p>
+  </div>
+</div>
+
+<!-- MAIN APP -->
+<div class="app" id="mainApp" style="display: none;">
+  <aside class="sidebar" id="sidebar">
+    <button aria-label="Chiudi" class="close-drawer" id="closeMenu">✕</button>
+
+    <!-- STATUS -->
+    <div class="group">
+      <div class="group-header">
+        <strong data-i18n="sidebar.status">Status</strong>
+        <i class="fas fa-chevron-down group-icon"></i>
+      </div>
+      <div class="group-content">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <h1 style="margin:0;">RugbyBoard</h1>
+          <select class="btn alt" id="langSelect" style="padding:.35rem .5rem; font-size:12px; box-shadow:none; border-radius:8px;">
+            <option value="it">IT</option>
+            <option value="en">EN</option>
+            <option value="es">ES</option>
+          </select>
+        </div>
+        <div class="status-indicator" id="authStatus" style="margin-top:10px;">
+          <span class="status-dot" id="statusDot"></span>
+          <span id="statusText" data-i18n="status.connecting">Connessione...</span>
+        </div>
+        <div class="firebase-status disconnected" id="firebaseStatus" style="margin-top:10px;">⚠️ Configura regole di sicurezza</div>
+        <button class="btn primary" id="btnAuthAction" style="margin-top:12px;" data-i18n="auth.logout">Esci</button>
+      </div>
+    </div>
+
+    <!-- CONTROLS -->
+    <div class="group">
+      <div class="group-header">
+        <strong data-i18n="sidebar.controls">Controlli</strong>
+        <i class="fas fa-chevron-down group-icon"></i>
+      </div>
+      <div class="group-content">
+        <div class="row" style="grid-template-columns: 1fr;">
+          <button class="btn" id="toggleLabels" data-i18n="controls.show_labels">Mostra etichette</button>
+          <button class="btn alt" id="reset" data-i18n="controls.reset_positions">Reimposta posizioni</button>
+        </div>
+        <label class="chk" style="display:flex;align-items:center;gap:8px;border:none;background:transparent;padding:0;box-shadow:none">
+          <input id="snapToggle" type="checkbox"/> <span data-i18n="controls.snap_grid">Aggancia alla griglia</span>
+        </label>
+        <label class="chk" style="display:flex;align-items:center;gap:8px;border:none;background:transparent;padding:0;box-shadow:none">
+          <input id="verticalField" type="checkbox"/> <span data-i18n="controls.vertical_field">Campo verticale</span>
+        </label>
+        <div class="player-counter">
+          <span><span data-i18n="controls.players">Giocatori</span>: <span id="playerCount">0</span>/30</span>
+          <button class="btn alt" id="addPlayerBtn" style="margin-left: auto;" data-i18n="controls.add_player">+ Giocatore</button>
+        </div>
+        <div class="row" style="grid-template-columns: 1fr 1fr;">
+          <label><span data-i18n="controls.color_a">Colore A</span><input id="teamAColor" type="color" value="#0d6efd"/></label>
+          <label><span data-i18n="controls.color_b">Colore B</span><input id="teamBColor" type="color" value="#e63946"/></label>
+        </div>
+        <div class="row" style="grid-template-columns: 1fr;">
+          <label><span data-i18n="controls.logo">Logo</span><input accept="image/*" id="teamLogoInput" type="file"/></label>
+        </div>
+        <div class="legend"><span class="swatch" id="teamALegendSwatch"></span> <span data-i18n="controls.team_a">Squadra A</span></div>
+        <div class="legend"><span class="swatch" id="teamBLegendSwatch"></span> <span data-i18n="controls.team_b">Squadra B</span></div>
+      </div>
+    </div>
+
+    <!-- TOOLS -->
+    <div class="group">
+      <div class="group-header">
+        <strong data-i18n="sidebar.tools">Strumenti</strong>
+        <i class="fas fa-chevron-down group-icon"></i>
+      </div>
+      <div class="group-content">
+        <div class="row" style="grid-template-columns: 1fr 1fr 1fr;">
+          <button class="btn selection-tool active" id="toolSelect" data-i18n="tools.select">Selezione</button>
+          <button class="btn alt" id="toolArrows" data-i18n="tools.arrows">Frecce</button>
+          <button class="btn alt" id="toolPen" data-i18n="tools.pen">Matita</button>
+        </div>
+        <div class="row" style="grid-template-columns: 1fr 1fr;">
+          <label><span data-i18n="tools.color">Colore</span>
+            <select id="strokeColor">
+              <option value="#ffffff" data-i18n="tools.color_white">Bianco</option>
+              <option value="#35d07f" data-i18n="tools.color_green">Verde</option>
+              <option value="#0d6efd" data-i18n="tools.color_blue">Blu</option>
+              <option value="#e63946" data-i18n="tools.color_red">Rosso</option>
+              <option value="#f4d35e" selected data-i18n="tools.color_yellow">Giallo</option>
+            </select>
+          </label>
+          <label><span data-i18n="tools.thickness">Spessore</span>
+            <select id="strokeWidth">
+              <option value="3" data-i18n="tools.thin">Sottile</option>
+              <option value="5" selected data-i18n="tools.medium">Medio</option>
+              <option value="7" data-i18n="tools.thick">Grosso</option>
+            </select>
+          </label>
+        </div>
+        <label class="chk" style="border:none;background:transparent;padding:0;box-shadow:none">
+          <input id="dashedToggle" type="checkbox"/> <span data-i18n="tools.dashed">Tratteggiata</span>
+        </label>
+        <div class="row" style="grid-template-columns: 1fr 1fr;">
+          <button class="btn" id="undoGeneric" data-i18n="tools.undo">Annulla</button>
+          <button class="btn" id="clearArrows" data-i18n="tools.clear_arrows">No Frecce</button>
+        </div>
+        <button class="btn" id="clearAll" data-i18n="tools.clear_all">Cancella tutto</button>
+      </div>
+    </div>
+
+    <!-- PLAYS -->
+    <div class="group">
+      <div class="group-header">
+        <strong data-i18n="sidebar.plays">Giocate</strong>
+        <i class="fas fa-chevron-down group-icon"></i>
+      </div>
+      <div class="group-content">
+        <input id="playName" placeholder="Nome giocata" type="text" data-i18n-placeholder="plays.name">
+        <div class="row" style="grid-template-columns: 1fr 1fr;">
+          <button class="btn" id="savePlay" data-i18n="plays.save">Salva</button>
+          <button class="btn alt" id="duplicatePlay" data-i18n="plays.duplicate">Duplica</button>
+        </div>
+        <select id="loadPlay"></select>
+        <div class="row" style="grid-template-columns: 1fr 1fr;">
+          <button class="btn danger" id="deletePlay" data-i18n="plays.delete">Elimina</button>
+          <button class="btn" id="btnLoadPlay" data-i18n="plays.load">Carica</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ANIMATION -->
+    <div class="group">
+      <div class="group-header">
+        <strong data-i18n="sidebar.animation">Animazione</strong>
+        <i class="fas fa-chevron-down group-icon"></i>
+      </div>
+      <div class="group-content">
+        <div class="row" style="grid-template-columns: 1fr 1fr; gap:8px;">
+          <button class="btn" id="recordStepBtn" data-i18n="animation.record_step">Registra passo</button>
+          <label class="chk" style="display:flex;align-items:center;gap:8px;border:none;background:transparent;padding:.4rem .6rem;box-shadow:none">
+            <input id="autoRecord" type="checkbox"/> <span data-i18n="animation.auto_rec">Auto-REC</span>
+          </label>
+        </div>
+        <div class="row" style="grid-template-columns: 1fr 1fr 1fr; gap:8px;">
+          <button class="btn primary" id="playBtn" data-i18n="animation.play">Play</button>
+          <button class="btn alt" id="pauseBtn" data-i18n="animation.pause">Pause</button>
+          <button class="btn" id="stopBtn" data-i18n="animation.stop">Stop</button>
+        </div>
+        <div class="row" style="grid-template-columns: repeat(3, 1fr); gap:6px;">
+          <button class="btn alt" id="speedSlowBtn" data-i18n="animation.slow">Lenta</button>
+          <button class="btn alt" id="speedMediumBtn" data-i18n="animation.medium">Media</button>
+          <button class="btn alt" id="speedFastBtn" data-i18n="animation.fast">Veloce</button>
+        </div>
+        <div class="row" style="grid-template-columns: auto 1fr; align-items:center; margin-top:4px;">
+          <span data-i18n="animation.speed">Velocità</span>
+          <input id="speedInput" min="100" step="100" type="number" value="800">
+        </div>
+        <div class="row" style="grid-template-columns: 1fr; gap:8px;">
+          <label><span data-i18n="animation.scrubber">Scrubber</span><input id="scrubber" max="0" min="0" type="range" value="0"/></label>
+          <div style="display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center;">
+            <button class="btn alt" id="prevFrameBtn">◀</button>
+            <div style="text-align:center;"><span data-i18n="animation.frame">Frame</span>: <span id="scrubberVal">0</span> / <span id="frameTotal">0</span></div>
+            <button class="btn alt" id="nextFrameBtn">▶</button>
+          </div>
+        </div>
+        <div class="row" style="grid-template-columns: 1fr 1fr 1fr; gap:8px;">
+          <button class="btn alt" id="clearTimelineBtn" data-i18n="animation.clear">Pulisci</button>
+          <button class="btn" id="duplicateFrameBtn" data-i18n="animation.duplicate">Duplica</button>
+          <button class="btn" id="exportTimelineBtn" data-i18n="animation.json">JSON</button>
+        </div>
+        <button class="btn alt" id="importTimelineBtn" data-i18n="animation.import_json">Importa JSON</button>
+        <div style="font-size:12px;opacity:.8;"><span data-i18n="animation.frames">Frames</span>: <span id="frameCount">0</span></div>
+        <div style="margin-top:10px;">
+          <textarea id="frameNote" placeholder="Nota del frame..." rows="3" data-i18n-placeholder="animation.frame_note"
+            style="width:100%;resize:vertical;padding:8px;border-radius:8px;border:1px solid var(--border);background:#0c1c2b;color:var(--ink);font-size:13px;"></textarea>
+        </div>
+      </div>
+    </div>
+
+    <!-- EXPORT -->
+    <div class="group">
+      <div class="group-header">
+        <strong data-i18n="sidebar.export">Export</strong>
+        <i class="fas fa-chevron-down group-icon"></i>
+      </div>
+      <div class="group-content">
+        <div class="row" style="grid-template-columns: 1fr;">
+          <button class="btn" id="exportJpgBtn" data-i18n="export.jpg">Esporta immagine (JPG)</button>
+          <button class="btn alt" id="sharePlayBtn" data-i18n="export.share">Condividi giocata</button>
+        </div>
+      </div>
+    </div>
+
+  </aside>
+
+  <main class="stage">
+    <div class="board-viewport" id="boardViewport">
+      <div class="board-wrap" id="boardWrap">
+        <div class="board" id="board">
+          <svg class="grid-overlay" id="grid" preserveAspectRatio="none" viewBox="0 0 1200 700"></svg>
+          <svg aria-hidden="true" class="lines" preserveAspectRatio="none" viewBox="0 0 1200 700">
+            <rect fill="none" height="690" stroke="#fff" stroke-width="6" width="1190" x="5" y="5"/>
+            <rect fill="rgba(255,255,255,.07)" height="700" width="80" x="0" y="0"/>
+            <rect fill="rgba(255,255,255,.07)" height="700" width="80" x="1120" y="0"/>
+            <line stroke="#fff" stroke-width="4" x1="80" x2="80" y1="0" y2="700"/>
+            <line stroke="#fff" stroke-width="4" x1="1120" x2="1120" y1="0" y2="700"/>
+            <line stroke="#fff" stroke-width="3" x1="309" x2="309" y1="0" y2="700"/>
+            <line stroke="#fff" stroke-width="3" x1="891" x2="891" y1="0" y2="700"/>
+            <line stroke="#fff" stroke-dasharray="8 10" stroke-width="2" x1="500" x2="500" y1="0" y2="700"/>
+            <line stroke="#fff" stroke-dasharray="8 10" stroke-width="2" x1="697" x2="697" y1="0" y2="700"/>
+            <line stroke="#fff" stroke-width="4" x1="600" x2="600" y1="0" y2="700"/>
+            <line stroke="#fff" stroke-dasharray="4 8" stroke-width="2" x1="5" x2="1195" y1="50" y2="50"/>
+            <line stroke="#fff" stroke-dasharray="4 8" stroke-width="2" x1="5" x2="1195" y1="150" y2="150"/>
+            <line stroke="#fff" stroke-dasharray="4 8" stroke-width="2" x1="5" x2="1195" y1="550" y2="550"/>
+            <line stroke="#fff" stroke-dasharray="4 8" stroke-width="2" x1="5" x2="1195" y1="650" y2="650"/>
+            <line stroke="#fff" stroke-dasharray="8 10" stroke-width="2" x1="130" x2="130" y1="0" y2="700"/>
+            <line stroke="#fff" stroke-dasharray="8 10" stroke-width="2" x1="1070" x2="1070" y1="0" y2="700"/>
+          </svg>
+          <svg id="draw" preserveAspectRatio="none" viewBox="0 0 1200 700"></svg>
+          <div id="players"></div>
+          <div class="ball" id="ball" title="Pallone"></div>
+          <img alt="Logo squadra" class="team-logo" id="teamLogo"/>
+          <div id="selectionBox" style="position:absolute; pointer-events:none; border:1px dashed var(--accent); background:rgba(0,194,255,0.1); z-index:5; display:none;"></div>
+        </div>
+      </div>
+    </div>
+    <canvas height="700" id="exportCanvas" style="position:fixed; top:-9999px; left:-9999px;" width="1200"></canvas>
+  </main>
+</div>
+
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, signInWithPopup, GoogleAuthProvider } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, doc, setDoc, deleteDoc, collection, query, onSnapshot, getDoc, getDocs, where, orderBy, addDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    // ─── FIREBASE CONFIG ───────────────────────────────────────────────────────
+    const firebaseConfig = {
+        apiKey: "AIzaSyACU3QfuTpW6PNRt3hHl9m1dy4Vso0GPoI",
+        authDomain: "bologna-rugby-club.firebaseapp.com",
+        projectId: "bologna-rugby-club",
+        storageBucket: "bologna-rugby-club.firebasestorage.app",
+        messagingSenderId: "641438144435",
+        appId: "1:641438144435:web:e2a243bacd522fd1615dc6",
+        measurementId: "G-9C66KXJ561"
+    };
+
+    // ─── i18n ──────────────────────────────────────────────────────────────────
+    const translations = {
+        it: {
+            "login.subtitle": "Accedi per utilizzare la lavagna",
+            "login.email": "Email",
+            "login.password": "Password",
+            "login.signin": "Accedi",
+            "login.signup": "Registrati",
+            "login.or": "o continua con",
+            "login.google": "Google",
+            "popup.success": "Successo!",
+            "aria.open_panel": "Apri pannello",
+            "aria.close_panel": "Chiudi",
+            "aria.language": "Lingua",
+            "sidebar.status": "Status",
+            "status.connecting": "Connessione...",
+            "firebase.security_rules": "⚠️ Configura regole di sicurezza",
+            "auth.logout": "Esci",
+            "auth.not_authenticated": "Non autenticato",
+            "status.welcome": "Benvenuto {email}!",
+            "firebase.connected": "✅ DB: Connesso",
+            "firebase.connection_issue": "⚠️ Problema di connessione",
+            "error.google_login": "Errore login Google: {message}",
+            "error.registration": "Errore registrazione: {code}",
+            "sidebar.controls": "Controlli",
+            "controls.show_labels": "Mostra etichette",
+            "controls.hide_labels": "Nascondi etichette",
+            "controls.reset_positions": "Reimposta posizioni",
+            "controls.snap_grid": "Aggancia alla griglia",
+            "controls.vertical_field": "Campo verticale",
+            "controls.players": "Giocatori",
+            "controls.add_player": "+ Giocatore",
+            "controls.color_a": "Colore A",
+            "controls.color_b": "Colore B",
+            "controls.logo": "Logo",
+            "controls.team_a": "Squadra A",
+            "controls.team_b": "Squadra B",
+            "sidebar.tools": "Strumenti",
+            "tools.select": "Selezione",
+            "tools.arrows": "Frecce",
+            "tools.pen": "Matita",
+            "tools.color": "Colore",
+            "tools.color_white": "Bianco",
+            "tools.color_green": "Verde",
+            "tools.color_blue": "Blu",
+            "tools.color_red": "Rosso",
+            "tools.color_yellow": "Giallo",
+            "tools.thickness": "Spessore",
+            "tools.thin": "Sottile",
+            "tools.medium": "Medio",
+            "tools.thick": "Grosso",
+            "tools.dashed": "Tratteggiata",
+            "tools.undo": "Annulla",
+            "tools.clear_arrows": "No Frecce",
+            "tools.clear_all": "Cancella tutto",
+            "sidebar.plays": "Giocate",
+            "plays.name": "Nome giocata",
+            "plays.save": "Salva",
+            "plays.duplicate": "Duplica",
+            "plays.delete": "Elimina",
+            "plays.load": "Carica",
+            "plays.load_placeholder": "-- Carica --",
+            "alert.load_a_play": "Carica una giocata",
+            "alert.missing_name": "Nome mancante.",
+            "alert.invalid_name": "Nome non valido",
+            "alert.save_local_error": "Errore salvataggio locale.",
+            "popup.loaded": "Caricato!",
+            "alert.load_error": "Errore caricamento",
+            "alert.login_required": "Login richiesto",
+            "alert.no_animation": "Nessuna animazione",
+            "alert.firebase_off": "Firebase off",
+            "popup.link_copied": "Link copiato!",
+            "alert.not_found": "Non trovato",
+            "alert.invalid_data": "Dati invalidi",
+            "alert.upload_error": "Errore upload",
+            "prompt.new_name": "Nuovo nome",
+            "default.play_name": "Giocata",
+            "sidebar.animation": "Animazione",
+            "animation.record_step": "Registra passo",
+            "animation.auto_rec": "Auto-REC",
+            "animation.play": "Play",
+            "animation.pause": "Pause",
+            "animation.stop": "Stop",
+            "animation.slow": "Lenta",
+            "animation.medium": "Media",
+            "animation.fast": "Veloce",
+            "animation.speed": "Velocità",
+            "animation.scrubber": "Scrubber",
+            "animation.frame": "Frame",
+            "animation.clear": "Pulisci",
+            "animation.duplicate": "Duplica",
+            "animation.json": "JSON",
+            "animation.import_json": "Importa JSON",
+            "animation.frames": "Frames",
+            "animation.frame_note": "Nota del frame...",
+            "confirm.delete_animation": "Eliminare animazione?",
+            "sidebar.export": "Export",
+            "export.jpg": "Esporta immagine (JPG)",
+            "export.share": "Condividi giocata",
+            "board.ball": "Pallone",
+            "board.team_logo": "Logo squadra",
+            "confirm.delete_play": "Eliminare?"
+        },
+        es: {
+            "login.subtitle": "Inicia sesión para usar la pizarra",
+            "login.email": "Correo electrónico",
+            "login.password": "Contraseña",
+            "login.signin": "Iniciar sesión",
+            "login.signup": "Registrarse",
+            "login.or": "o continúa con",
+            "login.google": "Google",
+            "popup.success": "¡Éxito!",
+            "sidebar.status": "Estado",
+            "status.connecting": "Conectando...",
+            "firebase.security_rules": "⚠️ Configura reglas de seguridad",
+            "auth.logout": "Cerrar sesión",
+            "auth.not_authenticated": "No autenticado",
+            "status.welcome": "Bienvenido {email}!",
+            "firebase.connected": "✅ DB: Conectado",
+            "firebase.connection_issue": "⚠️ Problema de conexión",
+            "error.google_login": "Error Google: {message}",
+            "error.registration": "Error registro: {code}",
+            "sidebar.controls": "Controles",
+            "controls.show_labels": "Mostrar etiquetas",
+            "controls.hide_labels": "Ocultar etiquetas",
+            "controls.reset_positions": "Restablecer posiciones",
+            "controls.snap_grid": "Ajustar a la cuadrícula",
+            "controls.vertical_field": "Campo vertical",
+            "controls.players": "Jugadores",
+            "controls.add_player": "+ Jugador",
+            "controls.color_a": "Color Equipo A",
+            "controls.color_b": "Color Equipo B",
+            "controls.logo": "Logo",
+            "controls.team_a": "Equipo A",
+            "controls.team_b": "Equipo B",
+            "sidebar.tools": "Herramientas",
+            "tools.select": "Seleccionar",
+            "tools.arrows": "Flechas",
+            "tools.pen": "Lápiz",
+            "tools.color": "Color",
+            "tools.color_white": "Blanco",
+            "tools.color_green": "Verde",
+            "tools.color_blue": "Azul",
+            "tools.color_red": "Rojo",
+            "tools.color_yellow": "Amarillo",
+            "tools.thickness": "Grosor",
+            "tools.thin": "Fino",
+            "tools.medium": "Medio",
+            "tools.thick": "Grueso",
+            "tools.dashed": "Discontinuo",
+            "tools.undo": "Deshacer",
+            "tools.clear_arrows": "Borrar flechas",
+            "tools.clear_all": "Borrar todo",
+            "sidebar.plays": "Jugadas",
+            "plays.name": "Nombre de la jugada",
+            "plays.save": "Guardar",
+            "plays.duplicate": "Duplicar",
+            "plays.delete": "Eliminar",
+            "plays.load": "Cargar",
+            "plays.load_placeholder": "-- Cargar --",
+            "alert.load_a_play": "Carga una jugada",
+            "alert.missing_name": "Nombre requerido.",
+            "alert.invalid_name": "Nombre inválido",
+            "alert.save_local_error": "Error guardado local.",
+            "popup.loaded": "¡Cargado!",
+            "alert.load_error": "Error al cargar",
+            "alert.login_required": "Requiere login",
+            "alert.no_animation": "Sin animación",
+            "alert.firebase_off": "Firebase offline",
+            "popup.link_copied": "¡Link copiado!",
+            "alert.not_found": "No encontrado",
+            "alert.invalid_data": "Datos inválidos",
+            "alert.upload_error": "Error de subida",
+            "prompt.new_name": "Nuevo nombre",
+            "default.play_name": "Jugada",
+            "sidebar.animation": "Animación",
+            "animation.record_step": "Grabar paso",
+            "animation.auto_rec": "Auto-REC",
+            "animation.play": "Reproducir",
+            "animation.pause": "Pausa",
+            "animation.stop": "Detener",
+            "animation.slow": "Lenta",
+            "animation.medium": "Media",
+            "animation.fast": "Rápida",
+            "animation.speed": "Velocidad",
+            "animation.scrubber": "Scrubber",
+            "animation.frame": "Frame",
+            "animation.clear": "Limpiar",
+            "animation.duplicate": "Duplicar",
+            "animation.json": "JSON",
+            "animation.import_json": "Importar JSON",
+            "animation.frames": "Frames",
+            "animation.frame_note": "Nota del frame...",
+            "confirm.delete_animation": "¿Eliminar animación?",
+            "sidebar.export": "Exportar",
+            "export.jpg": "Exportar imagen (JPG)",
+            "export.share": "Compartir jugada",
+            "confirm.delete_play": "¿Eliminar?"
+        },
+        en: {
+            "login.subtitle": "Sign in to use the board",
+            "login.email": "Email",
+            "login.password": "Password",
+            "login.signin": "Sign In",
+            "login.signup": "Sign Up",
+            "login.or": "or continue with",
+            "login.google": "Google",
+            "popup.success": "Success!",
+            "aria.open_panel": "Open panel",
+            "aria.close_panel": "Close",
+            "aria.language": "Language",
+            "sidebar.status": "Status",
+            "status.connecting": "Connecting...",
+            "firebase.security_rules": "⚠️ Configure security rules",
+            "auth.logout": "Logout",
+            "auth.not_authenticated": "Not authenticated",
+            "status.welcome": "Welcome {email}!",
+            "firebase.connected": "✅ DB: Connected",
+            "firebase.connection_issue": "⚠️ Connection issue",
+            "error.google_login": "Google sign-in error: {message}",
+            "error.registration": "Sign-up error: {code}",
+            "sidebar.controls": "Controls",
+            "controls.show_labels": "Show labels",
+            "controls.hide_labels": "Hide labels",
+            "controls.reset_positions": "Reset positions",
+            "controls.snap_grid": "Snap to grid",
+            "controls.vertical_field": "Vertical field",
+            "controls.players": "Players",
+            "controls.add_player": "+ Player",
+            "controls.color_a": "Team A color",
+            "controls.color_b": "Team B color",
+            "controls.logo": "Logo",
+            "controls.team_a": "Team A",
+            "controls.team_b": "Team B",
+            "sidebar.tools": "Tools",
+            "tools.select": "Select",
+            "tools.arrows": "Arrows",
+            "tools.pen": "Pen",
+            "tools.color": "Color",
+            "tools.color_white": "White",
+            "tools.color_green": "Green",
+            "tools.color_blue": "Blue",
+            "tools.color_red": "Red",
+            "tools.color_yellow": "Yellow",
+            "tools.thickness": "Thickness",
+            "tools.thin": "Thin",
+            "tools.medium": "Medium",
+            "tools.thick": "Thick",
+            "tools.dashed": "Dashed",
+            "tools.undo": "Undo",
+            "tools.clear_arrows": "Clear arrows",
+            "tools.clear_all": "Clear all",
+            "sidebar.plays": "Plays",
+            "plays.name": "Play name",
+            "plays.save": "Save",
+            "plays.duplicate": "Duplicate",
+            "plays.delete": "Delete",
+            "plays.load": "Load",
+            "plays.load_placeholder": "-- Load --",
+            "alert.load_a_play": "Load a play",
+            "alert.missing_name": "Missing name.",
+            "alert.invalid_name": "Invalid name",
+            "alert.save_local_error": "Local save error.",
+            "popup.loaded": "Loaded!",
+            "alert.load_error": "Load error",
+            "alert.login_required": "Login required",
+            "alert.no_animation": "No animation",
+            "alert.firebase_off": "Firebase offline",
+            "popup.link_copied": "Link copied!",
+            "alert.not_found": "Not found",
+            "alert.invalid_data": "Invalid data",
+            "alert.upload_error": "Upload error",
+            "prompt.new_name": "New name",
+            "default.play_name": "Play",
+            "sidebar.animation": "Animation",
+            "animation.record_step": "Record step",
+            "animation.auto_rec": "Auto-REC",
+            "animation.play": "Play",
+            "animation.pause": "Pause",
+            "animation.stop": "Stop",
+            "animation.slow": "Slow",
+            "animation.medium": "Medium",
+            "animation.fast": "Fast",
+            "animation.speed": "Speed",
+            "animation.scrubber": "Scrubber",
+            "animation.frame": "Frame",
+            "animation.clear": "Clear",
+            "animation.duplicate": "Duplicate",
+            "animation.json": "JSON",
+            "animation.import_json": "Import JSON",
+            "animation.frames": "Frames",
+            "animation.frame_note": "Frame note...",
+            "confirm.delete_animation": "Delete animation?",
+            "sidebar.export": "Export",
+            "export.jpg": "Export image (JPG)",
+            "export.share": "Share play",
+            "confirm.delete_play": "Delete?"
+        }
+    };
+
+    function getInitialLang() {
+        const saved = localStorage.getItem('rb_lang');
+        if (saved && translations[saved]) return saved;
+        const nav = (navigator.language || '').slice(0,2).toLowerCase();
+        return translations[nav] ? nav : 'it';
+    }
+
+    let currentLang = getInitialLang();
+
+    function t(key, vars = {}) {
+        const dict = translations[currentLang] || translations.it;
+        let str = dict[key] ?? translations.it[key] ?? key;
+        for (const [k,v] of Object.entries(vars)) str = str.replaceAll(`{${k}}`, String(v));
+        return str;
+    }
+
+    function applyI18n() {
+        document.documentElement.lang = currentLang;
+        localStorage.setItem('rb_lang', currentLang);
+        document.querySelectorAll('[data-i18n]').forEach(el => { const k = el.getAttribute('data-i18n'); if (k) el.textContent = t(k); });
+        document.querySelectorAll('[data-i18n-placeholder]').forEach(el => { const k = el.getAttribute('data-i18n-placeholder'); if (k) el.setAttribute('placeholder', t(k)); });
+        document.querySelectorAll('[data-i18n-title]').forEach(el => { const k = el.getAttribute('data-i18n-title'); if (k) el.setAttribute('title', t(k)); });
+        document.querySelectorAll('[data-i18n-alt]').forEach(el => { const k = el.getAttribute('data-i18n-alt'); if (k) el.setAttribute('alt', t(k)); });
+        document.querySelectorAll('[data-i18n-aria]').forEach(el => { const k = el.getAttribute('data-i18n-aria'); if (k) el.setAttribute('aria-label', t(k)); });
+        const ls = document.getElementById('langSelect');
+        if (ls) ls.value = currentLang;
+    }
+
+    function setLang(lang) {
+        if (!translations[lang]) return;
+        currentLang = lang;
+        applyI18n();
+        if (typeof AuthManager !== 'undefined' && AuthManager.updateUI) AuthManager.updateUI(Boolean(currentUser));
+        if (typeof UIManager !== 'undefined' && UIManager.refreshToggleLabelsText) UIManager.refreshToggleLabelsText();
+        if (typeof StorageManager !== 'undefined' && StorageManager.updatePlaySelect) StorageManager.updatePlaySelect();
+    }
+
+    // ─── STATE ─────────────────────────────────────────────────────────────────
+    let app = null, db = null, auth = null, isAuthorized = false, currentUser = null, firebaseConnected = false;
+    const WIDTH = 1200, HEIGHT = 700, GRID_SIZE = 24;
+    const TL_KEY = 'rugby-timeline-v2', POS_KEY = 'rugby-positions-v3', ARROW_KEY = 'rugby-arrows-v3',
+          STROKE_KEY = 'rugby-strokes-v1', BALL_KEY = 'rugby-ball-v1', PLAY_PREFIX = 'play-v3-',
+          TEAM_COLORS_KEY = 'rugby-team-colors-v1', TEAM_LOGO_KEY = 'rugby-team-logo-v1';
+
+    let appState = {
+        // ✅ ALL FEATURES FREE — isPremium always true
+        isPremium: true,
+        layout: { mode: 'landscape', scale: 1, tx: 0, ty: 0, forceVertical: false },
+        tool: 'select',
+        arrows: [],
+        strokes: [],
+        drawingArrow: false,
+        drawingStroke: false,
+        startPoint: null,
+        currentStroke: null,
+        timeline: [],
+        playing: false,
+        paused: false,
+        playIndex: 0,
+        rafId: null,
+        segmentStartTime: 0,
+        segmentDuration: 800,
+        fromFrame: null,
+        toFrame: null,
+        selectedPlayers: new Set(),
+        playerCounter: { blue: 0, red: 0 },
+        isSharedView: false,
+        readOnly: false,
+        presentationMode: false,
+        teamColors: { blue: '#0d6efd', red: '#e63946' },
+        teamLogoDataUrl: null
+    };
+
+    const exportCanvasEl = document.getElementById('exportCanvas');
+    const dom = {
+        loginOverlay: document.getElementById('loginOverlay'),
+        mainApp: document.getElementById('mainApp'),
+        boardViewport: document.getElementById('boardViewport'),
+        boardWrap: document.getElementById('boardWrap'),
+        board: document.getElementById('board'),
+        playersLayer: document.getElementById('players'),
+        draw: document.getElementById('draw'),
+        gridSvg: document.getElementById('grid'),
+        ball: document.getElementById('ball'),
+        teamLogo: document.getElementById('teamLogo'),
+        exportCanvas: exportCanvasEl,
+        ctx: exportCanvasEl ? exportCanvasEl.getContext('2d') : null,
+        selectionBox: document.getElementById('selectionBox'),
+        sidebar: document.getElementById('sidebar'),
+        menuBtn: document.getElementById('menuBtn'),
+        closeMenuBtn: document.getElementById('closeMenu'),
+        scrim: document.getElementById('scrim'),
+        loginEmail: document.getElementById('loginEmail'),
+        loginPassword: document.getElementById('loginPassword'),
+        btnLogin: document.getElementById('btnLogin'),
+        btnRegister: document.getElementById('btnRegister'),
+        btnGoogle: document.getElementById('btnGoogle'),
+        loginMessage: document.getElementById('loginMessage'),
+        btnAuthAction: document.getElementById('btnAuthAction'),
+        authStatus: document.getElementById('authStatus'),
+        statusDot: document.getElementById('statusDot'),
+        statusText: document.getElementById('statusText'),
+        toggleLabelsBtn: document.getElementById('toggleLabels'),
+        resetBtn: document.getElementById('reset'),
+        snapToggle: document.getElementById('snapToggle'),
+        verticalFieldChk: document.getElementById('verticalField'),
+        toolSelectBtn: document.getElementById('toolSelect'),
+        toolArrowsBtn: document.getElementById('toolArrows'),
+        toolPenBtn: document.getElementById('toolPen'),
+        undoGenericBtn: document.getElementById('undoGeneric'),
+        clearArrowsBtn: document.getElementById('clearArrows'),
+        clearAllBtn: document.getElementById('clearAll'),
+        strokeColorSel: document.getElementById('strokeColor'),
+        strokeWidthSel: document.getElementById('strokeWidth'),
+        dashedToggle: document.getElementById('dashedToggle'),
+        recordStepBtn: document.getElementById('recordStepBtn'),
+        autoRecordChk: document.getElementById('autoRecord'),
+        playBtn: document.getElementById('playBtn'),
+        pauseBtn: document.getElementById('pauseBtn'),
+        stopBtn: document.getElementById('stopBtn'),
+        speedInput: document.getElementById('speedInput'),
+        clearTimelineBtn: document.getElementById('clearTimelineBtn'),
+        exportTimelineBtn: document.getElementById('exportTimelineBtn'),
+        importTimelineBtn: document.getElementById('importTimelineBtn'),
+        frameCountEl: document.getElementById('frameCount'),
+        scrubber: document.getElementById('scrubber'),
+        scrubberVal: document.getElementById('scrubberVal'),
+        frameTotal: document.getElementById('frameTotal'),
+        prevFrameBtn: document.getElementById('prevFrameBtn'),
+        nextFrameBtn: document.getElementById('nextFrameBtn'),
+        playNameInput: document.getElementById('playName'),
+        loadPlaySel: document.getElementById('loadPlay'),
+        savePlayBtn: document.getElementById('savePlay'),
+        duplicatePlayBtn: document.getElementById('duplicatePlay'),
+        deletePlayBtn: document.getElementById('deletePlay'),
+        btnLoadPlay: document.getElementById('btnLoadPlay'),
+        exportJpgBtn: document.getElementById('exportJpgBtn'),
+        sharePlayBtn: document.getElementById('sharePlayBtn'),
+        playerCount: document.getElementById('playerCount'),
+        addPlayerBtn: document.getElementById('addPlayerBtn'),
+        firebaseStatus: document.getElementById('firebaseStatus'),
+        successPopup: document.getElementById('successPopup'),
+        successMessage: document.getElementById('successMessage'),
+        frameNote: document.getElementById('frameNote'),
+        duplicateFrameBtn: document.getElementById('duplicateFrameBtn'),
+        speedSlowBtn: document.getElementById('speedSlowBtn'),
+        speedMediumBtn: document.getElementById('speedMediumBtn'),
+        speedFastBtn: document.getElementById('speedFastBtn'),
+        teamAColor: document.getElementById('teamAColor'),
+        teamBColor: document.getElementById('teamBColor'),
+        teamALegendSwatch: document.getElementById('teamALegendSwatch'),
+        teamBLegendSwatch: document.getElementById('teamBLegendSwatch'),
+        teamLogoInput: document.getElementById('teamLogoInput')
+    };
+
+    // Apply i18n + wire language selector
+    applyI18n();
+    const __langSel = document.getElementById('langSelect');
+    if (__langSel) __langSel.addEventListener('change', (e) => setLang(e.target.value));
+
+    // ─── HELPERS ───────────────────────────────────────────────────────────────
+    function sanitizeInput(value) {
+        if (typeof value !== 'string') return '';
+        return value.replace(/[<>]/g, '').trim();
+    }
+    function dist(ax, ay, bx, by) { return Math.hypot(ax - bx, ay - by); }
+    function centerOf(el) { return { x: parseFloat(el.style.left) || 0, y: parseFloat(el.style.top) || 0 }; }
+    function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+    function lerp(a, b, t) { return a + (b - a) * t; }
+    function snap(val) { return Math.round(val / GRID_SIZE) * GRID_SIZE; }
+    function ballOverPlayer(playerEl, threshold = 28) { const b = centerOf(dom.ball); const p = centerOf(playerEl); return dist(b.x, b.y, p.x, p.y) < threshold; }
+
+    // ─── POPUP ─────────────────────────────────────────────────────────────────
+    const PopupManager = {
+        showSuccess(message) {
+            dom.successMessage.textContent = message;
+            dom.successPopup.classList.remove('hide');
+            dom.successPopup.classList.add('show');
+            setTimeout(() => { dom.successPopup.classList.remove('show'); dom.successPopup.classList.add('hide'); }, 3000);
+        }
+    };
+
+    // ─── AUTH ──────────────────────────────────────────────────────────────────
+    const AuthManager = {
+        async init() {
+            try {
+                if (!app) app = initializeApp(firebaseConfig);
+                if (!db) db = getFirestore(app);
+                if (!auth) auth = getAuth(app);
+
+                return await new Promise((resolve) => {
+                    let first = true;
+                    onAuthStateChanged(auth, async (user) => {
+                        currentUser = user;
+                        if (user) {
+                            isAuthorized = true;
+                            this.showApp();
+                            this.updateUI(true);
+                            this.showStatus(t('status.welcome', { email: user.email }), 'success');
+
+                            // Ensure user doc exists
+                            const userRef = doc(db, "users", user.uid);
+                            try {
+                                const userSnap = await getDoc(userRef);
+                                if (!userSnap.exists()) {
+                                    await setDoc(userRef, { email: user.email, createdAt: new Date() });
+                                }
+                            } catch (e) { console.log("User doc check error", e); }
+
+                            await this.testFirebaseConnection();
+                        } else {
+                            isAuthorized = false;
+                            firebaseConnected = false;
+                            this.showLogin();
+                            this.updateUI(false);
+                            this.showStatus(t('auth.not_authenticated'), 'danger');
+                        }
+                        if (first) { first = false; resolve(Boolean(user)); }
+                    });
+                });
+            } catch (error) {
+                console.error("AuthManager init error:", error);
+                this.showLogin();
+                this.updateUI(false);
+                return false;
+            }
+        },
+
+        async login() {
+            try {
+                const email = (dom.loginEmail?.value || '').trim();
+                const pass = (dom.loginPassword?.value || '').trim();
+                if (!email || !pass) { this.setLoginMessage("Inserisci email e password", true); return; }
+                this.setLoginMessage("", false);
+                await signInWithEmailAndPassword(auth, email, pass);
+            } catch (err) {
+                console.error(err);
+                this.setLoginMessage("Errore login. Controlla credenziali.", true);
+            }
+        },
+
+        async registerWithEmail() {
+            try {
+                const email = (dom.loginEmail?.value || '').trim();
+                const pass = (dom.loginPassword?.value || '').trim();
+                if (!email || !pass) { this.setLoginMessage("Inserisci email e password", true); return; }
+                this.setLoginMessage("", false);
+                await createUserWithEmailAndPassword(auth, email, pass);
+                this.setLoginMessage("Account creato! Ora sei loggato.", false);
+            } catch (err) {
+                const code = err?.code ? String(err.code) : 'unknown';
+                this.setLoginMessage(t('error.registration', { code }), true);
+            }
+        },
+
+        async loginWithGoogle() {
+            try {
+                const provider = new GoogleAuthProvider();
+                await signInWithPopup(auth, provider);
+            } catch (err) {
+                const msg = err?.message ? String(err.message) : 'unknown';
+                this.setLoginMessage(t('error.google_login', { message: msg }), true);
+            }
+        },
+
+        async logout() {
+            try { await signOut(auth); } catch (err) { console.error(err); }
+        },
+
+        showLogin() {
+            const login = document.getElementById('loginOverlay');
+            const appEl = document.getElementById('mainApp');
+            if (login) login.style.display = 'flex';
+            if (appEl) appEl.style.display = 'none';
+            document.body.classList.remove('main-app-visible');
+        },
+
+        showApp() {
+            const login = document.getElementById('loginOverlay');
+            const appEl = document.getElementById('mainApp');
+            if (login) login.style.display = 'none';
+            if (appEl) appEl.style.display = 'grid';
+            document.body.classList.add('main-app-visible');
+            if (window.innerWidth <= 900 && dom.menuBtn) dom.menuBtn.style.display = 'grid';
+        },
+
+        updateUI(isLoggedIn) {
+            const authBtn = document.getElementById('btnAuthAction');
+            if (!authBtn) return;
+            if (isLoggedIn) {
+                authBtn.textContent = t('auth.logout');
+                authBtn.onclick = (e) => { e.preventDefault(); this.logout(); };
+            } else {
+                authBtn.textContent = t('login.signin');
+                authBtn.onclick = (e) => { e.preventDefault(); this.login(); };
+            }
+        },
+
+        showStatus(message, type) {
+            const statusText = document.getElementById('statusText');
+            const statusDot = document.getElementById('statusDot');
+            if (statusText) statusText.textContent = message;
+            if (statusDot) {
+                statusDot.classList.remove('offline', 'error');
+                if (type === 'danger') statusDot.classList.add('error');
+            }
+        },
+
+        setLoginMessage(msg, isError) {
+            const el = document.getElementById('loginMessage');
+            if (!el) return;
+            el.textContent = msg || '';
+            el.classList.toggle('login-error', Boolean(isError));
+            el.classList.toggle('login-success', Boolean(!isError && msg));
+        },
+
+        updateFirebaseStatus(connected, err) {
+            firebaseConnected = Boolean(connected);
+            const el = document.getElementById('firebaseStatus');
+            if (!el) return;
+            el.classList.toggle('connected', connected);
+            el.classList.toggle('disconnected', !connected);
+            if (connected) {
+                el.textContent = t('firebase.connected');
+            } else {
+                el.textContent = err?.code === 'permission-denied' ? t('firebase.security_rules') : t('firebase.connection_issue');
+            }
+        },
+
+        async testFirebaseConnection() {
+            try {
+                if (!currentUser) { this.updateFirebaseStatus(false); return false; }
+                await getDoc(doc(db, "users", currentUser.uid));
+                this.updateFirebaseStatus(true);
+                return true;
+            } catch (e) {
+                this.updateFirebaseStatus(false, e);
+                return false;
+            }
+        }
+    };
+
+    // ─── LAYOUT ────────────────────────────────────────────────────────────────
+    const LayoutManager = {
+        isPortraitLike() {
+            if (appState.layout.forceVertical) return true;
+            const mq = window.matchMedia('(orientation: portrait)');
+            return (mq && mq.matches) || (window.innerHeight > window.innerWidth);
+        },
+        applyUprightTransforms() {
+            const rot = (appState.layout.mode === 'portrait');
+            [...dom.playersLayer.children].forEach(el => { el.style.transform = rot ? 'translate(-50%, -50%) rotate(-90deg)' : 'translate(-50%, -50%)'; });
+            dom.ball.style.transform = rot ? 'translate(-50%, -50%) rotate(-90deg)' : 'translate(-50%, -50%) rotate(-15deg)';
+        },
+        fitBoard() {
+            const vp = dom.boardViewport.getBoundingClientRect();
+            const availW = vp.width, availH = vp.height;
+            if (!this.isPortraitLike()) {
+                appState.layout.mode = 'landscape';
+                appState.layout.scale = Math.min(availW / WIDTH, availH / HEIGHT);
+                const scaledW = WIDTH * appState.layout.scale, scaledH = HEIGHT * appState.layout.scale;
+                appState.layout.tx = (availW - scaledW) / 2;
+                appState.layout.ty = (availH - scaledH) / 2;
+                dom.boardWrap.style.transform = `translate(${appState.layout.tx}px, ${appState.layout.ty}px) rotate(0deg) scale(${appState.layout.scale})`;
+            } else {
+                appState.layout.mode = 'portrait';
+                appState.layout.scale = Math.min(availW / HEIGHT, availH / WIDTH);
+                const contentW = HEIGHT * appState.layout.scale, contentH = WIDTH * appState.layout.scale;
+                appState.layout.tx = (availW - contentW) / 2 + contentW;
+                appState.layout.ty = (availH - contentH) / 2;
+                dom.boardWrap.style.transform = `translate(${appState.layout.tx}px, ${appState.layout.ty}px) rotate(90deg) scale(${appState.layout.scale})`;
+            }
+            dom.boardWrap.style.transformOrigin = 'top left';
+            this.applyUprightTransforms();
+        },
+        clientToBoard(e) {
+            const vp = dom.boardViewport.getBoundingClientRect();
+            const cx = e.clientX - vp.left, cy = e.clientY - vp.top;
+            if (appState.layout.mode === 'portrait') {
+                return { x: clamp((cy - appState.layout.ty) / appState.layout.scale, 0, WIDTH), y: clamp(-(cx - appState.layout.tx) / appState.layout.scale, 0, HEIGHT) };
+            }
+            return { x: clamp((cx - appState.layout.tx) / appState.layout.scale, 0, WIDTH), y: clamp((cy - appState.layout.ty) / appState.layout.scale, 0, HEIGHT) };
+        },
+        deltaToBoard(dxClient, dyClient) {
+            if (appState.layout.mode === 'portrait') return { dx: dyClient / appState.layout.scale, dy: -dxClient / appState.layout.scale };
+            const scale = dom.board.getBoundingClientRect().width / WIDTH;
+            return { dx: dxClient / scale, dy: dyClient / scale };
+        },
+        renderGrid() {
+            const s = GRID_SIZE;
+            dom.gridSvg.innerHTML = '';
+            const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+            for (let x = s; x < WIDTH; x += s) {
+                const l = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                l.setAttribute('x1', x); l.setAttribute('y1', 0); l.setAttribute('x2', x); l.setAttribute('y2', HEIGHT);
+                l.setAttribute('stroke', 'var(--grid)'); l.setAttribute('stroke-width', '1'); g.appendChild(l);
+            }
+            for (let y = s; y < HEIGHT; y += s) {
+                const l = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                l.setAttribute('x1', 0); l.setAttribute('y1', y); l.setAttribute('x2', WIDTH); l.setAttribute('y2', y);
+                l.setAttribute('stroke', 'var(--grid)'); l.setAttribute('stroke-width', '1'); g.appendChild(l);
+            }
+            dom.gridSvg.appendChild(g);
+            dom.gridSvg.classList.toggle('active', dom.snapToggle.checked);
+        }
+    };
+
+    // ─── TEAM VISUAL ───────────────────────────────────────────────────────────
+    const TeamVisualManager = {
+        init() {
+            try {
+                const saved = localStorage.getItem(TEAM_COLORS_KEY);
+                if (saved) { const p = JSON.parse(saved); if (p.blue) appState.teamColors.blue = p.blue; if (p.red) appState.teamColors.red = p.red; }
+            } catch {}
+            if (dom.teamAColor) dom.teamAColor.value = appState.teamColors.blue;
+            if (dom.teamBColor) dom.teamBColor.value = appState.teamColors.red;
+            this.updateLegendSwatches();
+            this.applyColorsToPlayers();
+            try {
+                const logoData = localStorage.getItem(TEAM_LOGO_KEY);
+                if (logoData && dom.teamLogo) { appState.teamLogoDataUrl = logoData; dom.teamLogo.src = logoData; }
+            } catch {}
+
+            if (dom.teamAColor) {
+                dom.teamAColor.addEventListener('input', () => {
+                    appState.teamColors.blue = dom.teamAColor.value;
+                    this.persistColors(); this.updateLegendSwatches(); this.applyColorsToPlayers();
+                });
+            }
+            if (dom.teamBColor) {
+                dom.teamBColor.addEventListener('input', () => {
+                    appState.teamColors.red = dom.teamBColor.value;
+                    this.persistColors(); this.updateLegendSwatches(); this.applyColorsToPlayers();
+                });
+            }
+            if (dom.teamLogoInput) {
+                dom.teamLogoInput.addEventListener('change', (e) => {
+                    const file = e.target.files[0]; if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = (ev) => {
+                        const dataUrl = ev.target.result;
+                        appState.teamLogoDataUrl = dataUrl;
+                        if (dom.teamLogo) dom.teamLogo.src = dataUrl;
+                        try { localStorage.setItem(TEAM_LOGO_KEY, dataUrl); } catch {}
+                    };
+                    reader.readAsDataURL(file);
+                });
+            }
+        },
+        persistColors() { try { localStorage.setItem(TEAM_COLORS_KEY, JSON.stringify(appState.teamColors)); } catch {} },
+        updateLegendSwatches() {
+            if (dom.teamALegendSwatch) dom.teamALegendSwatch.style.backgroundColor = appState.teamColors.blue;
+            if (dom.teamBLegendSwatch) dom.teamBLegendSwatch.style.backgroundColor = appState.teamColors.red;
+        },
+        applyColorsToPlayers() {
+            [...dom.playersLayer.children].forEach(el => {
+                const team = el.dataset.team;
+                if (team === 'blue' || team === 'red') el.style.backgroundColor = appState.teamColors[team];
+            });
+        }
+    };
+
+    // ─── UNITS ─────────────────────────────────────────────────────────────────
+    const UnitsManager = {
+        initialPositions: (function () {
+            const positions = [];
+            for (let i = 1; i <= 15; i++) positions.push({ team: 'blue', number: i, x: WIDTH * 0.18, y: HEIGHT * (0.1 + (i - 1) * (0.8 / 14)) });
+            for (let i = 1; i <= 15; i++) positions.push({ team: 'red', number: i, x: WIDTH * 0.82, y: HEIGHT * (0.1 + (i - 1) * (0.8 / 14)) });
+            return positions;
+        })(),
+        countPlayers() {
+            const players = [...dom.playersLayer.children];
+            const blueCount = players.filter(p => p.dataset.team === 'blue').length;
+            const redCount = players.filter(p => p.dataset.team === 'red').length;
+            appState.playerCounter = { blue: blueCount, red: redCount };
+            const total = blueCount + redCount;
+            dom.playerCount.textContent = total;
+            dom.addPlayerBtn.disabled = total >= 30;
+            dom.addPlayerBtn.textContent = total >= 30 ? 'Massimo 30' : t('controls.add_player');
+            return { blue: blueCount, red: redCount, total };
+        },
+        addPlayer() {
+            const counts = this.countPlayers();
+            if (counts.total >= 30) { alert('Massimo 30 giocatori!'); return null; }
+            const team = counts.blue <= counts.red ? 'blue' : 'red';
+            const newNumber = counts[team] + 1;
+            const x = team === 'blue' ? WIDTH * 0.18 : WIDTH * 0.82;
+            const playerEl = this.createPlayerElement(team, newNumber, x, HEIGHT * 0.5);
+            dom.playersLayer.appendChild(playerEl);
+            this.countPlayers();
+            StorageManager.savePositions();
+            return playerEl;
+        },
+        createPlayerElement(team, number, x, y) {
+            const el = document.createElement('div');
+            el.className = 'player';
+            el.textContent = number;
+            el.style.left = x + 'px';
+            el.style.top = y + 'px';
+            el.dataset.number = number;
+            el.dataset.team = team;
+            el.style.backgroundColor = appState.teamColors[team] || (team === 'blue' ? '#0d6efd' : '#e63946');
+            el.style.transform = appState.layout.mode === 'portrait' ? 'translate(-50%, -50%) rotate(-90deg)' : 'translate(-50%, -50%)';
+            this.enableDragPlayer(el, () => {
+                StorageManager.savePositions();
+                if (dom.autoRecordChk.checked) TimelineManager.recordFrame();
+            });
+            return el;
+        },
+        createPlayers() {
+            dom.playersLayer.innerHTML = '';
+            this.initialPositions.forEach(p => dom.playersLayer.appendChild(this.createPlayerElement(p.team, p.number, p.x, p.y)));
+            this.countPlayers();
+            LayoutManager.applyUprightTransforms();
+            TeamVisualManager.applyColorsToPlayers();
+        },
+        enableDragPlayer(playerEl, onDrop) {
+            if (!isAuthorized || appState.readOnly) return;
+            let pointerId = null, startX = 0, startY = 0, origL = 0, origT = 0, lockBallToPlayer = false, offX = 0, offY = 0, isGroupMove = false, playerOffsets = [], isDragging = false;
+            const onDown = e => {
+                if (!isAuthorized || appState.readOnly || appState.tool !== 'select') return;
+                pointerId = e.pointerId; playerEl.setPointerCapture(pointerId); e.preventDefault();
+                startX = e.clientX; startY = e.clientY;
+                origL = parseFloat(playerEl.style.left) || 0; origT = parseFloat(playerEl.style.top) || 0; isDragging = false;
+                if (e.ctrlKey || e.shiftKey) {
+                    if (playerEl.classList.contains('selected')) { playerEl.classList.remove('selected'); appState.selectedPlayers.delete(playerEl); }
+                    else { playerEl.classList.add('selected'); appState.selectedPlayers.add(playerEl); }
+                } else if (!playerEl.classList.contains('selected')) {
+                    InteractionManager.clearSelection(); playerEl.classList.add('selected'); appState.selectedPlayers.add(playerEl);
+                }
+                isGroupMove = appState.selectedPlayers.size > 1;
+                if (isGroupMove) playerOffsets = Array.from(appState.selectedPlayers).map(el => ({ el, initialX: parseFloat(el.style.left), initialY: parseFloat(el.style.top) }));
+                lockBallToPlayer = ballOverPlayer(playerEl);
+                if (lockBallToPlayer) { const p0 = { x: origL, y: origT }; const b0 = centerOf(dom.ball); offX = b0.x - p0.x; offY = b0.y - p0.y; }
+                const onMove = ev => {
+                    if (ev.pointerId !== pointerId) return; ev.preventDefault(); isDragging = true;
+                    const { dx, dy } = LayoutManager.deltaToBoard(ev.clientX - startX, ev.clientY - startY);
+                    if (isGroupMove) { playerOffsets.forEach(pl => { pl.el.style.left = clamp(pl.initialX + dx, 0, WIDTH) + 'px'; pl.el.style.top = clamp(pl.initialY + dy, 0, HEIGHT) + 'px'; }); }
+                    else { playerEl.style.left = clamp(origL + dx, 0, WIDTH) + 'px'; playerEl.style.top = clamp(origT + dy, 0, HEIGHT) + 'px'; }
+                    if (lockBallToPlayer) { const np = centerOf(playerEl); dom.ball.style.left = clamp(np.x + offX, 0, WIDTH) + 'px'; dom.ball.style.top = clamp(np.y + offY, 0, HEIGHT) + 'px'; }
+                };
+                const onUp = ev => {
+                    if (ev.pointerId !== pointerId) return;
+                    try { playerEl.releasePointerCapture(pointerId); } catch {}
+                    document.removeEventListener('pointermove', onMove); document.removeEventListener('pointerup', onUp);
+                    if (isDragging) {
+                        if (dom.snapToggle.checked) {
+                            const finalize = el => { el.style.left = snap(parseFloat(el.style.left)) + 'px'; el.style.top = snap(parseFloat(el.style.top)) + 'px'; };
+                            if (isGroupMove) { playerOffsets.forEach(pl => finalize(pl.el)); }
+                            else { finalize(playerEl); }
+                            if (lockBallToPlayer) { const pos = centerOf(playerEl); dom.ball.style.left = clamp(snap(pos.x + offX), 0, WIDTH) + 'px'; dom.ball.style.top = clamp(snap(pos.y + offY), 0, HEIGHT) + 'px'; }
+                        }
+                        (onDrop || (() => {}))(isGroupMove);
+                    } else {
+                        if (!e.ctrlKey && !e.shiftKey && appState.selectedPlayers.size > 1) { InteractionManager.clearSelection(); playerEl.classList.add('selected'); appState.selectedPlayers.add(playerEl); }
+                    }
+                };
+                document.addEventListener('pointermove', onMove, { passive: false }); document.addEventListener('pointerup', onUp, { passive: false });
+            };
+            playerEl.addEventListener('pointerdown', onDown, { passive: false }); playerEl.ondragstart = () => false;
+        },
+        placeBall(x = WIDTH * 0.5, y = HEIGHT * 0.5) { dom.ball.style.left = x + 'px'; dom.ball.style.top = y + 'px'; dom.ball.style.transform = 'translate(-50%, -50%) rotate(-15deg)'; },
+        enableDragBall(onDrop) {
+            if (!isAuthorized || appState.readOnly) return;
+            let pointerId = null, startX = 0, startY = 0, origL = 0, origT = 0, passerEl = null;
+            const onDown = e => {
+                if (!isAuthorized || appState.readOnly || appState.tool !== 'select') return;
+                pointerId = e.pointerId; dom.ball.setPointerCapture(pointerId); e.preventDefault();
+                startX = e.clientX; startY = e.clientY; origL = parseFloat(dom.ball.style.left) || 0; origT = parseFloat(dom.ball.style.top) || 0;
+                InteractionManager.clearSelection();
+                const b0 = centerOf(dom.ball);
+                passerEl = (() => { let best = null, bestD = Infinity; for (const el of dom.playersLayer.children) { const p = centerOf(el); const d = dist(b0.x, b0.y, p.x, p.y); if (d < 28 && d < bestD) { best = el; bestD = d; } } return best; })();
+                if (passerEl) { const p = centerOf(passerEl); UnitsManager.setPassPreview(p.x, p.y, b0.x, b0.y); }
+                const onMove = ev => {
+                    if (ev.pointerId !== pointerId) return; ev.preventDefault();
+                    const { dx, dy } = LayoutManager.deltaToBoard(ev.clientX - startX, ev.clientY - startY);
+                    let nx = clamp(origL + dx, 0, WIDTH), ny = clamp(origT + dy, 0, HEIGHT);
+                    dom.ball.style.left = nx + 'px'; dom.ball.style.top = ny + 'px';
+                    if (passerEl) { const p = centerOf(passerEl); UnitsManager.setPassPreview(p.x, p.y, nx, ny); }
+                };
+                const onUp = ev => {
+                    if (ev.pointerId !== pointerId) return;
+                    try { dom.ball.releasePointerCapture(pointerId); } catch {}
+                    document.removeEventListener('pointermove', onMove); document.removeEventListener('pointerup', onUp);
+                    UnitsManager.clearPassPreview();
+                    if (dom.snapToggle.checked) { dom.ball.style.left = snap(parseFloat(dom.ball.style.left)) + 'px'; dom.ball.style.top = snap(parseFloat(dom.ball.style.top)) + 'px'; }
+                    (onDrop || (() => {}))();
+                };
+                document.addEventListener('pointermove', onMove, { passive: false }); document.addEventListener('pointerup', onUp, { passive: false });
+            };
+            dom.ball.addEventListener('pointerdown', onDown, { passive: false }); dom.ball.ondragstart = () => false;
+        },
+        setPassPreview(x1, y1, x2, y2) {
+            let el = document.getElementById('passPreview');
+            if (!el) { el = document.createElementNS('http://www.w3.org/2000/svg', 'line'); el.id = 'passPreview'; el.setAttribute('stroke', 'var(--yellow)'); el.setAttribute('stroke-width', '5'); el.setAttribute('stroke-dasharray', '12 8'); el.style.pointerEvents = 'none'; dom.draw.prepend(el); }
+            el.setAttribute('x1', x1); el.setAttribute('y1', y1); el.setAttribute('x2', x2); el.setAttribute('y2', y2);
+        },
+        clearPassPreview() { const el = document.getElementById('passPreview'); if (el) el.remove(); }
+    };
+
+    // ─── INTERACTION ───────────────────────────────────────────────────────────
+    const InteractionManager = {
+        enableSelectionBox() {
+            if (!isAuthorized || appState.readOnly) return;
+            let selPid = null, selStart = null, hasMoved = false;
+            dom.board.addEventListener('pointerdown', (e) => {
+                if (!isAuthorized || appState.readOnly || appState.tool !== 'select') return;
+                if (e.target.closest('.player') || e.target.closest('#ball')) return;
+                selPid = e.pointerId; dom.board.setPointerCapture(selPid); e.preventDefault();
+                selStart = LayoutManager.clientToBoard(e); hasMoved = false;
+                dom.selectionBox.style.left = selStart.x + 'px'; dom.selectionBox.style.top = selStart.y + 'px';
+                dom.selectionBox.style.width = '0'; dom.selectionBox.style.height = '0';
+                if (!e.ctrlKey && !e.shiftKey) this.clearSelection();
+                const onMove = ev => {
+                    if (ev.pointerId !== selPid) return; ev.preventDefault(); hasMoved = true; dom.selectionBox.style.display = 'block';
+                    const cur = LayoutManager.clientToBoard(ev);
+                    const left = Math.min(selStart.x, cur.x), top = Math.min(selStart.y, cur.y), right = Math.max(selStart.x, cur.x), bottom = Math.max(selStart.y, cur.y);
+                    dom.selectionBox.style.left = left + 'px'; dom.selectionBox.style.top = top + 'px';
+                    dom.selectionBox.style.width = (right - left) + 'px'; dom.selectionBox.style.height = (bottom - top) + 'px';
+                    this.selectPlayersInArea(left, top, right, bottom, e.ctrlKey || e.shiftKey);
+                };
+                const onUp = ev => {
+                    if (ev.pointerId !== selPid) return;
+                    try { dom.board.releasePointerCapture(selPid); } catch {}
+                    document.removeEventListener('pointermove', onMove); document.removeEventListener('pointerup', onUp);
+                    dom.selectionBox.style.display = 'none'; selPid = null;
+                    if (!hasMoved) this.clearSelection();
+                };
+                document.addEventListener('pointermove', onMove, { passive: false }); document.addEventListener('pointerup', onUp, { passive: false });
+            });
+        },
+        selectPlayersInArea(left, top, right, bottom, additive = false) {
+            if (!additive) { appState.selectedPlayers.forEach(p => p.classList.remove('selected')); appState.selectedPlayers.clear(); }
+            [...dom.playersLayer.children].forEach(player => {
+                const px = parseFloat(player.style.left), py = parseFloat(player.style.top), r = 20;
+                if (px + r >= left && px - r <= right && py + r >= top && py - r <= bottom) {
+                    if (!player.classList.contains('selected')) { player.classList.add('selected'); appState.selectedPlayers.add(player); }
+                } else if (!additive) {
+                    player.classList.remove('selected'); appState.selectedPlayers.delete(player);
+                }
+            });
+        },
+        clearSelection() { appState.selectedPlayers.forEach(p => p.classList.remove('selected')); appState.selectedPlayers.clear(); }
+    };
+
+    // ─── TOOL ──────────────────────────────────────────────────────────────────
+    const ToolManager = {
+        setTool(tool) {
+            if (!isAuthorized) return; appState.tool = tool;
+            dom.toolSelectBtn.classList.remove('active', 'alt'); dom.toolArrowsBtn.classList.remove('active', 'alt'); dom.toolPenBtn.classList.remove('active', 'alt');
+            if (tool === 'select') { dom.toolSelectBtn.classList.add('active'); dom.toolArrowsBtn.classList.add('alt'); dom.toolPenBtn.classList.add('alt'); dom.draw.style.pointerEvents = 'none'; }
+            else if (tool === 'arrows') { dom.toolArrowsBtn.classList.add('active'); dom.toolSelectBtn.classList.add('alt'); dom.toolPenBtn.classList.add('alt'); dom.draw.style.pointerEvents = 'auto'; }
+            else if (tool === 'pen') { dom.toolPenBtn.classList.add('active'); dom.toolSelectBtn.classList.add('alt'); dom.toolArrowsBtn.classList.add('alt'); dom.draw.style.pointerEvents = 'auto'; }
+            if (tool !== 'select') InteractionManager.clearSelection();
+        }
+    };
+
+    // ─── DRAW ──────────────────────────────────────────────────────────────────
+    const DrawManager = {
+        clearDraw() { if (!isAuthorized || appState.readOnly) return; dom.draw.innerHTML = ''; appState.arrows = []; appState.strokes = []; StorageManager.saveArrows(); StorageManager.saveStrokes(); },
+        clearArrows() { if (!isAuthorized || appState.readOnly) return; appState.arrows = []; this.renderDraw(); StorageManager.saveArrows(); },
+        undoLast() {
+            if (!isAuthorized || appState.readOnly) return;
+            const la = appState.arrows[appState.arrows.length - 1], ls = appState.strokes[appState.strokes.length - 1];
+            const lat = la ? la.timestamp || 0 : 0, lst = ls ? ls.timestamp || 0 : 0;
+            if (lat > lst) { appState.arrows.pop(); StorageManager.saveArrows(); }
+            else if (lst > 0) { appState.strokes.pop(); StorageManager.saveStrokes(); }
+            this.renderDraw();
+        },
+        renderDraw() {
+            dom.draw.innerHTML = '';
+            let defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs'); dom.draw.appendChild(defs);
+            appState.strokes.forEach(s => {
+                const l = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+                l.setAttribute('points', s.points.map(p => `${p.x},${p.y}`).join(' ')); l.setAttribute('fill', 'none');
+                l.setAttribute('stroke', s.color); l.setAttribute('stroke-width', s.width); l.setAttribute('stroke-linecap', 'round'); l.setAttribute('stroke-linejoin', 'round');
+                if (s.dashed) l.setAttribute('stroke-dasharray', '12 8'); dom.draw.appendChild(l);
+            });
+            appState.arrows.forEach(a => {
+                const mid = `ah-${a.color.replace('#','')}-${a.width}`;
+                if (!defs.querySelector(`#${mid}`)) {
+                    const m = document.createElementNS('http://www.w3.org/2000/svg', 'marker'); m.setAttribute('id', mid); m.setAttribute('viewBox', '0 0 10 10'); m.setAttribute('refX', '10'); m.setAttribute('refY', '5'); m.setAttribute('markerUnits', 'strokeWidth'); m.setAttribute('markerWidth', parseFloat(a.width)*0.7); m.setAttribute('markerHeight', parseFloat(a.width)*0.7); m.setAttribute('orient', 'auto-start-reverse');
+                    const p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); p.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z'); p.setAttribute('fill', a.color); m.appendChild(p); defs.appendChild(m);
+                }
+                const l = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                l.setAttribute('x1', a.x1); l.setAttribute('y1', a.y1); l.setAttribute('x2', a.x2); l.setAttribute('y2', a.y2);
+                l.setAttribute('stroke', a.color); l.setAttribute('stroke-width', a.width); l.setAttribute('stroke-linecap', 'round');
+                if (a.dashed) l.setAttribute('stroke-dasharray', '12 8'); l.setAttribute('marker-end', `url(#${mid})`); dom.draw.appendChild(l);
+            });
+            UnitsManager.clearPassPreview();
+        },
+        enableDrawing() { dom.draw.addEventListener('pointerdown', DrawManager.onPointerDown, { passive: false }); },
+        onPointerDown(e) {
+            if (!isAuthorized || appState.readOnly || e.button !== 0 || appState.tool === 'select') return;
+            if (e.target.closest('.player') || e.target.closest('#ball')) return;
+            e.preventDefault();
+            let pointerId = e.pointerId, startPoint = LayoutManager.clientToBoard(e);
+            if (appState.tool === 'arrows') { appState.drawingArrow = true; DrawManager.drawArrowPreview(startPoint.x, startPoint.y, startPoint.x, startPoint.y); }
+            else if (appState.tool === 'pen') { appState.drawingStroke = true; appState.currentStroke = { points: [{ x: startPoint.x, y: startPoint.y }], color: dom.strokeColorSel.value, width: dom.strokeWidthSel.value, dashed: dom.dashedToggle.checked, timestamp: Date.now() }; }
+            dom.draw.setPointerCapture(pointerId);
+            const onMove = ev => {
+                if (ev.pointerId !== pointerId) return; ev.preventDefault();
+                const { x, y } = LayoutManager.clientToBoard(ev); const cx = clamp(x, 0, WIDTH), cy = clamp(y, 0, HEIGHT);
+                if (appState.tool === 'arrows' && appState.drawingArrow) DrawManager.drawArrowPreview(startPoint.x, startPoint.y, cx, cy);
+                else if (appState.tool === 'pen' && appState.drawingStroke) { const last = appState.currentStroke.points[appState.currentStroke.points.length - 1]; if (dist(last.x, last.y, cx, cy) > 5) { appState.currentStroke.points.push({ x: cx, y: cy }); DrawManager.drawStrokePreview(appState.currentStroke); } }
+            };
+            const onUp = ev => {
+                if (ev.pointerId !== pointerId) return;
+                try { dom.draw.releasePointerCapture(pointerId); } catch {}
+                dom.draw.removeEventListener('pointermove', onMove); dom.draw.removeEventListener('pointerup', onUp); dom.draw.removeEventListener('pointerleave', onUp);
+                DrawManager.clearPreview();
+                const { x, y } = LayoutManager.clientToBoard(ev); const ex = clamp(x, 0, WIDTH), ey = clamp(y, 0, HEIGHT);
+                if (appState.tool === 'arrows' && appState.drawingArrow) {
+                    if (dist(startPoint.x, startPoint.y, ex, ey) > 10) { appState.arrows.push({ x1: startPoint.x, y1: startPoint.y, x2: ex, y2: ey, color: dom.strokeColorSel.value, width: dom.strokeWidthSel.value, dashed: dom.dashedToggle.checked, timestamp: Date.now() }); StorageManager.saveArrows(); }
+                    appState.drawingArrow = false;
+                } else if (appState.tool === 'pen' && appState.drawingStroke) {
+                    if (appState.currentStroke.points.length > 1) { appState.strokes.push(appState.currentStroke); StorageManager.saveStrokes(); }
+                    appState.drawingStroke = false; appState.currentStroke = null;
+                }
+                DrawManager.renderDraw();
+                if (dom.autoRecordChk.checked) TimelineManager.recordFrame();
+            };
+            dom.draw.addEventListener('pointermove', onMove, { passive: false }); dom.draw.addEventListener('pointerup', onUp, { passive: false }); dom.draw.addEventListener('pointerleave', onUp, { passive: false });
+        },
+        drawArrowPreview(x1, y1, x2, y2) {
+            let l = document.getElementById('arrowPreviewLine'), h = document.getElementById('arrowPreviewHead');
+            if (!l) { l = document.createElementNS('http://www.w3.org/2000/svg', 'line'); h = document.createElementNS('http://www.w3.org/2000/svg', 'polygon'); l.id = 'arrowPreviewLine'; h.id = 'arrowPreviewHead'; dom.draw.appendChild(l); dom.draw.appendChild(h); }
+            const c = dom.strokeColorSel.value, w = parseFloat(dom.strokeWidthSel.value), d = dom.dashedToggle.checked;
+            l.setAttribute('x1', x1); l.setAttribute('y1', y1); l.setAttribute('x2', x2); l.setAttribute('y2', y2); l.setAttribute('stroke', c); l.setAttribute('stroke-width', w); l.setAttribute('stroke-linecap', 'round');
+            if (d) l.setAttribute('stroke-dasharray', '12 8'); else l.removeAttribute('stroke-dasharray');
+            const ang = Math.atan2(y2 - y1, x2 - x1), s = w * 2.5;
+            const pts = [`${x2},${y2}`, `${x2 - s * Math.cos(ang - Math.PI/6)},${y2 - s * Math.sin(ang - Math.PI/6)}`, `${x2 - s * Math.cos(ang + Math.PI/6)},${y2 - s * Math.sin(ang + Math.PI/6)}`];
+            h.setAttribute('points', pts.join(' ')); h.setAttribute('fill', c);
+        },
+        drawStrokePreview(s) {
+            let l = document.getElementById('strokePreview');
+            if (!l) { l = document.createElementNS('http://www.w3.org/2000/svg', 'polyline'); l.id = 'strokePreview'; dom.draw.appendChild(l); }
+            l.setAttribute('points', s.points.map(p => `${p.x},${p.y}`).join(' ')); l.setAttribute('fill', 'none'); l.setAttribute('stroke', s.color); l.setAttribute('stroke-width', s.width); l.setAttribute('stroke-linecap', 'round'); l.setAttribute('stroke-linejoin', 'round');
+            if (s.dashed) l.setAttribute('stroke-dasharray', '12 8'); else l.removeAttribute('stroke-dasharray');
+        },
+        clearPreview() { ['arrowPreviewLine', 'arrowPreviewHead', 'strokePreview'].forEach(id => { const el = document.getElementById(id); if (el) el.remove(); }); }
+    };
+
+    // ─── TIMELINE ──────────────────────────────────────────────────────────────
+    const TimelineManager = {
+        recordFrame() {
+            if (!isAuthorized || appState.readOnly) return;
+            const players = [...dom.playersLayer.children].map(el => ({ team: el.dataset.team, number: +el.dataset.number, x: parseFloat(el.style.left), y: parseFloat(el.style.top) }));
+            const ball = { x: parseFloat(dom.ball.style.left) || WIDTH/2, y: parseFloat(dom.ball.style.top) || HEIGHT/2 };
+            const arrows = JSON.parse(JSON.stringify(appState.arrows)), strokes = JSON.parse(JSON.stringify(appState.strokes));
+            const note = sanitizeInput(dom.frameNote ? dom.frameNote.value : '');
+            const newFrame = { players, ball, arrows, strokes, note };
+            if (appState.playing) { appState.timeline.push(newFrame); appState.playIndex = appState.timeline.length - 1; }
+            else if (appState.playIndex < appState.timeline.length) { appState.timeline.splice(appState.playIndex + 1, appState.timeline.length, newFrame); appState.playIndex++; }
+            else { appState.timeline.push(newFrame); appState.playIndex = appState.timeline.length - 1; }
+            this.updateScrubber(); this.updateNoteUI(); StorageManager.saveTimeline();
+        },
+        clearTimeline() {
+            if (!isAuthorized || appState.readOnly) return;
+            if (!confirm(t('confirm.delete_animation'))) return;
+            appState.timeline = []; appState.playIndex = 0; this.updateScrubber(); this.updateNoteUI(); StorageManager.saveTimeline();
+        },
+        renderInterpolatedFrame(fromIndex, t_val) {
+            t_val = clamp(isNaN(t_val) ? 0 : t_val, 0, 1);
+            const f0 = appState.timeline[fromIndex], f1 = appState.timeline[fromIndex + 1];
+            if (!f0 || !f1) { if (f0) this.loadFrame(fromIndex); return; }
+            const pMap = new Map(); [...dom.playersLayer.children].forEach(el => pMap.set(el.dataset.team + el.dataset.number, el));
+            f0.players.forEach(p0 => { const el = pMap.get(p0.team + p0.number); if (el) { const p1 = f1.players.find(pp => pp.team === p0.team && pp.number === p0.number) || p0; el.style.left = lerp(p0.x, p1.x, t_val) + 'px'; el.style.top = lerp(p0.y, p1.y, t_val) + 'px'; } });
+            UnitsManager.placeBall(lerp(f0.ball.x, f1.ball.x, t_val), lerp(f0.ball.y, f1.ball.y, t_val));
+            appState.arrows = JSON.parse(JSON.stringify(f0.arrows)); appState.strokes = JSON.parse(JSON.stringify(f0.strokes)); DrawManager.renderDraw();
+            appState.playIndex = fromIndex; this.updateScrubber(); LayoutManager.applyUprightTransforms();
+        },
+        loadFrame(index) {
+            index = clamp(index, 0, appState.timeline.length > 0 ? appState.timeline.length - 1 : 0);
+            const frame = appState.timeline[index]; if (!frame) return;
+            const pMap = new Map(); [...dom.playersLayer.children].forEach(el => pMap.set(el.dataset.team + el.dataset.number, el));
+            frame.players.forEach(p => { const el = pMap.get(p.team + p.number); if (el) { el.style.left = p.x + 'px'; el.style.top = p.y + 'px'; } });
+            UnitsManager.placeBall(frame.ball.x, frame.ball.y);
+            appState.arrows = JSON.parse(JSON.stringify(frame.arrows)); appState.strokes = JSON.parse(JSON.stringify(frame.strokes)); DrawManager.renderDraw();
+            appState.playIndex = index; this.updateScrubber(); this.updateNoteUI(); LayoutManager.applyUprightTransforms();
+            if (!appState.playing) { StorageManager.savePositions(); StorageManager.saveBall(); StorageManager.saveArrows(); StorageManager.saveStrokes(); }
+        },
+        updateScrubber() {
+            const count = appState.timeline.length;
+            dom.frameCountEl.textContent = count; dom.frameTotal.textContent = count;
+            dom.scrubber.max = Math.max(0, count - 1); dom.scrubber.value = appState.playIndex; dom.scrubberVal.textContent = appState.playIndex;
+            if (count === 0) dom.scrubber.value = 0;
+            this.updateNoteUI();
+        },
+        handleScrubberChange(e) { const index = parseInt(e.target.value); if (index < appState.timeline.length) TimelineManager.loadFrame(index); },
+        play(timestamp) {
+            if (!appState.playing || appState.timeline.length < 2) { appState.playing = false; appState.paused = false; dom.playBtn.textContent = 'Play'; return; }
+            if (appState.paused) return;
+            const dur = (isNaN(appState.segmentDuration) || appState.segmentDuration < 16) ? 800 : appState.segmentDuration;
+            if (appState.fromFrame == null) {
+                if (isNaN(appState.playIndex) || appState.playIndex < 0 || appState.playIndex >= appState.timeline.length - 1) appState.playIndex = 0;
+                appState.fromFrame = appState.playIndex; appState.segmentStartTime = timestamp;
+                TimelineManager.loadFrame(appState.fromFrame);
+            }
+            if (appState.fromFrame >= appState.timeline.length - 1) { appState.playing = false; appState.paused = false; appState.fromFrame = null; dom.playBtn.textContent = 'Play'; TimelineManager.updateScrubber(); return; }
+            const elapsed = timestamp - appState.segmentStartTime, t_val = elapsed / dur;
+            if (t_val >= 1) {
+                appState.fromFrame += 1; appState.playIndex = appState.fromFrame; appState.segmentStartTime = timestamp;
+                if (appState.fromFrame >= appState.timeline.length - 1) { TimelineManager.loadFrame(appState.fromFrame); appState.playing = false; appState.paused = false; appState.fromFrame = null; dom.playBtn.textContent = 'Play'; TimelineManager.updateScrubber(); return; }
+                else TimelineManager.renderInterpolatedFrame(appState.fromFrame, 0);
+            } else TimelineManager.renderInterpolatedFrame(appState.fromFrame, t_val);
+            appState.rafId = requestAnimationFrame(t => TimelineManager.play(t));
+        },
+        startPlay() {
+            if (appState.timeline.length < 2) return;
+            const val = parseInt(dom.speedInput.value); appState.segmentDuration = (isNaN(val) || val < 16) ? 800 : val;
+            appState.playing = true; appState.paused = false; if (appState.fromFrame === null) appState.playIndex = 0; appState.fromFrame = null;
+            dom.playBtn.textContent = '...'; dom.pauseBtn.textContent = 'Pausa';
+            cancelAnimationFrame(appState.rafId); appState.rafId = requestAnimationFrame(t => TimelineManager.play(t));
+        },
+        pausePlay() { if (!appState.playing) return; appState.paused = true; try { cancelAnimationFrame(appState.rafId); } catch {} dom.playBtn.textContent = 'Riprendi'; dom.pauseBtn.textContent = 'Pausa: ON'; },
+        stopPlay() { appState.playing = false; appState.paused = false; appState.fromFrame = null; try { cancelAnimationFrame(appState.rafId); } catch {} dom.playBtn.textContent = 'Play'; dom.pauseBtn.textContent = 'Pausa'; if (appState.timeline.length > 0) this.loadFrame(0); },
+        updateNoteUI() {
+            if (!dom.frameNote) return;
+            const frame = appState.timeline[appState.playIndex];
+            dom.frameNote.value = frame && frame.note ? frame.note : '';
+            dom.frameNote.readOnly = appState.readOnly;
+        },
+        duplicateFrame() {
+            if (!isAuthorized || appState.readOnly || !appState.timeline.length) return;
+            const idx = clamp(appState.playIndex, 0, appState.timeline.length - 1);
+            const clone = JSON.parse(JSON.stringify(appState.timeline[idx]));
+            appState.timeline.splice(idx + 1, 0, clone); appState.playIndex = idx + 1;
+            this.updateScrubber(); this.updateNoteUI(); StorageManager.saveTimeline();
+        }
+    };
+
+    // ─── STORAGE ───────────────────────────────────────────────────────────────
+    const StorageManager = {
+        async savePlay() {
+            if (!isAuthorized) return;
+            const name = sanitizeInput(dom.playNameInput.value ?? '');
+            dom.playNameInput.value = name;
+            if (!name) { alert(t('alert.missing_name')); return; }
+            if (appState.timeline.length === 0) { alert('Nessun frame registrato.'); return; }
+            const playData = {
+                name, timeline: appState.timeline, arrows: appState.arrows, strokes: appState.strokes,
+                positions: [...dom.playersLayer.children].map(el => ({ team: el.dataset.team, number: +el.dataset.number, x: parseFloat(el.style.left), y: parseFloat(el.style.top) })),
+                ball: centerOf(dom.ball), teamColors: appState.teamColors,
+                teamLogoDataUrl: appState.teamLogoDataUrl || null,
+                createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+                createdBy: currentUser.uid, email: currentUser.email
+            };
+            if (firebaseConnected && db) {
+                try { await setDoc(doc(db, "users", currentUser.uid, "plays", name), playData); PopupManager.showSuccess(`✅ Saved to DB!`); this.updatePlaySelect(); return; }
+                catch (error) { if (error.code === 'permission-denied') { firebaseConnected = false; AuthManager.updateFirebaseStatus(false, error); } }
+            }
+            try { localStorage.setItem(PLAY_PREFIX + name, JSON.stringify(playData)); PopupManager.showSuccess(`💾 Saved Locally`); } catch (e) { alert(t('alert.save_local_error')); return; }
+            this.updatePlaySelect();
+        },
+        async loadPlay(name) {
+            try {
+                let playData;
+                if (db && currentUser) {
+                    try { const snap = await getDoc(doc(db, "users", currentUser.uid, "plays", name)); if (snap.exists()) { playData = snap.data(); localStorage.setItem(PLAY_PREFIX + name, JSON.stringify(playData)); } else throw new Error(); }
+                    catch (e) { const raw = localStorage.getItem(PLAY_PREFIX + name); if (!raw) { alert("Not found"); return; } playData = JSON.parse(raw); }
+                } else { const raw = localStorage.getItem(PLAY_PREFIX + name); if (!raw) { alert("Not found"); return; } playData = JSON.parse(raw); }
+                await this.processPlayData(playData, name);
+            } catch (error) { alert('Error loading play.'); }
+        },
+        async processPlayData(data, name) {
+            appState.timeline = (data.timeline || []).map(f => ({ ...f, note: f.note || '' })); TimelineManager.updateScrubber();
+            appState.arrows = data.arrows || []; appState.strokes = data.strokes || [];
+            if (data.teamColors) { appState.teamColors = { ...appState.teamColors, ...data.teamColors }; TeamVisualManager.persistColors(); }
+            if (data.teamLogoDataUrl) { appState.teamLogoDataUrl = data.teamLogoDataUrl; if (dom.teamLogo) dom.teamLogo.src = data.teamLogoDataUrl; try { localStorage.setItem(TEAM_LOGO_KEY, data.teamLogoDataUrl); } catch {} }
+            TeamVisualManager.updateLegendSwatches();
+            if (appState.timeline.length > 0) { UnitsManager.createPlayers(); TeamVisualManager.applyColorsToPlayers(); TimelineManager.loadFrame(0); }
+            else if (data.positions) {
+                UnitsManager.createPlayers(); const pMap = new Map(); [...dom.playersLayer.children].forEach(el => pMap.set(el.dataset.team + el.dataset.number, el));
+                data.positions.forEach(p => { const el = pMap.get(p.team + p.number); if (el) { el.style.left = p.x + 'px'; el.style.top = p.y + 'px'; } });
+                UnitsManager.placeBall(data.ball.x, data.ball.y); DrawManager.renderDraw();
+            } else DrawManager.renderDraw();
+            dom.playNameInput.value = sanitizeInput(name || '');
+            this.saveTimeline(); this.saveArrows(); this.saveStrokes(); this.savePositions(); this.saveBall();
+            TeamVisualManager.applyColorsToPlayers(); LayoutManager.applyUprightTransforms(); PopupManager.showSuccess(`✅ Loaded!`);
+        },
+        async deletePlay() {
+            if (!isAuthorized || !currentUser) return;
+            const name = dom.loadPlaySel.value;
+            if (name && confirm(t('confirm.delete_play'))) {
+                try { if (db && firebaseConnected) await deleteDoc(doc(db, "users", currentUser.uid, "plays", name)); localStorage.removeItem(PLAY_PREFIX + name); this.updatePlaySelect(); dom.playNameInput.value = ''; PopupManager.showSuccess('✅ Deleted'); }
+                catch (e) { localStorage.removeItem(PLAY_PREFIX + name); this.updatePlaySelect(); PopupManager.showSuccess('⚠️ Deleted locally'); }
+            }
+        },
+        async updatePlaySelect() {
+            dom.loadPlaySel.innerHTML = `<option value="">${t('plays.load_placeholder')}</option>`;
+            try {
+                let plays = [];
+                for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k.startsWith(PLAY_PREFIX)) plays.push(k.substring(PLAY_PREFIX.length)); }
+                if (db && currentUser && isAuthorized) { try { const q = query(collection(db, "users", currentUser.uid, "plays"), orderBy("updatedAt", "desc")); const snap = await getDocs(q); snap.forEach(d => { if (!plays.includes(d.id)) plays.push(d.id); }); } catch {} }
+                plays.sort().forEach(n => { const o = document.createElement('option'); o.value = n; o.textContent = n; dom.loadPlaySel.appendChild(o); });
+            } catch (e) {
+                dom.loadPlaySel.innerHTML = `<option value="">${t('plays.load_placeholder')}</option>`;
+                for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k.startsWith(PLAY_PREFIX)) { const n = k.substring(PLAY_PREFIX.length); const o = document.createElement('option'); o.value = n; o.textContent = n; dom.loadPlaySel.appendChild(o); } }
+            }
+        },
+        savePositions() { localStorage.setItem(POS_KEY, JSON.stringify([...dom.playersLayer.children].map(el => ({ team: el.dataset.team, number: +el.dataset.number, x: parseFloat(el.style.left), y: parseFloat(el.style.top) })))); },
+        loadPositions() {
+            const s = localStorage.getItem(POS_KEY); if (!s) { UnitsManager.createPlayers(); return; }
+            const p = JSON.parse(s); UnitsManager.createPlayers(); const m = new Map(); [...dom.playersLayer.children].forEach(el => m.set(el.dataset.team + el.dataset.number, el));
+            p.forEach(pos => { const el = m.get(pos.team + pos.number); if (el) { el.style.left = pos.x + 'px'; el.style.top = pos.y + 'px'; } });
+            UnitsManager.countPlayers(); LayoutManager.applyUprightTransforms(); TeamVisualManager.applyColorsToPlayers();
+        },
+        saveBall() { localStorage.setItem(BALL_KEY, JSON.stringify(centerOf(dom.ball))); },
+        loadBall() { const s = localStorage.getItem(BALL_KEY); if (s) { const p = JSON.parse(s); UnitsManager.placeBall(p.x, p.y); } },
+        saveArrows() { localStorage.setItem(ARROW_KEY, JSON.stringify(appState.arrows)); },
+        loadArrows() { const s = localStorage.getItem(ARROW_KEY); if (s) appState.arrows = JSON.parse(s); },
+        saveStrokes() { localStorage.setItem(STROKE_KEY, JSON.stringify(appState.strokes)); },
+        loadStrokes() { const s = localStorage.getItem(STROKE_KEY); if (s) appState.strokes = JSON.parse(s); },
+        saveTimeline() { localStorage.setItem(TL_KEY, JSON.stringify(appState.timeline)); },
+        loadTimeline() { const s = localStorage.getItem(TL_KEY); if (s) appState.timeline = (JSON.parse(s) || []).map(f => ({ ...f, note: f.note || '' })); TimelineManager.updateScrubber(); },
+        exportTimeline() {
+            const b = new Blob([JSON.stringify(appState.timeline, null, 2)], { type: 'application/json' });
+            const u = URL.createObjectURL(b); const a = document.createElement('a'); a.href = u; a.download = (dom.playNameInput.value?.trim() || 'play') + '.json'; document.body.appendChild(a); a.click(); a.remove();
+        },
+        importTimeline() {
+            const i = document.createElement('input'); i.type = 'file'; i.accept = 'application/json';
+            i.onchange = e => { const f = e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = e2 => { try { const tl = JSON.parse(e2.target.result); if (Array.isArray(tl)) { appState.timeline = tl.map(f => ({ ...f, note: f.note || '' })); this.saveTimeline(); TimelineManager.loadFrame(0); alert(`Imported ${tl.length} frames.`); } } catch { alert('Error importing'); } }; r.readAsText(f); }; i.click();
+        },
+        duplicatePlay() {
+            if (!isAuthorized) return;
+            const orig = sanitizeInput(dom.playNameInput.value ?? '');
+            if (!orig) return alert(t('alert.load_a_play'));
+            const nu = prompt(t('prompt.new_name'));
+            if (nu) {
+                const nuSan = sanitizeInput(nu);
+                if (!nuSan) { alert(t('alert.invalid_name')); return; }
+                const raw = localStorage.getItem(PLAY_PREFIX + orig);
+                if (raw) { localStorage.setItem(PLAY_PREFIX + nuSan, raw); dom.playNameInput.value = nuSan; this.savePlay(); this.updatePlaySelect(); dom.loadPlaySel.value = nuSan; }
+            }
+        },
+        async createShareLink() {
+            if (!isAuthorized || !currentUser) return alert(t('alert.login_required'));
+            if (!appState.timeline.length) return alert(t('alert.no_animation'));
+            if (!db) return alert(t('alert.firebase_off'));
+            const safeName = sanitizeInput(dom.playNameInput.value ?? '') || t('default.play_name');
+            const sid = crypto.randomUUID(); const url = new URL(window.location.href); url.searchParams.set('shared', sid);
+            const sUrl = url.toString(); let ok = false;
+            if (navigator.share) { try { await navigator.share({ title: 'RugbyBoard', text: safeName, url: sUrl }); ok = true; } catch {} }
+            if (!ok && navigator.clipboard) { try { await navigator.clipboard.writeText(sUrl); PopupManager.showSuccess(t('popup.link_copied')); ok = true; } catch {} }
+            if (!ok) alert('Link: ' + sUrl);
+            try { await setDoc(doc(db, "shared_plays", sid), { name: safeName, timeline: appState.timeline, arrows: appState.arrows, strokes: appState.strokes, teamColors: appState.teamColors, teamLogoDataUrl: appState.teamLogoDataUrl || null, createdAt: new Date().toISOString(), ownerUid: currentUser.uid }); }
+            catch (e) { alert(t('alert.upload_error')); }
+        },
+        async loadSharedPlay(sid) {
+            try {
+                if (!db) return alert(t('alert.firebase_off'));
+                const s = await getDoc(doc(db, "shared_plays", sid)); if (!s.exists()) return alert(t('alert.not_found'));
+                const d = s.data(); if (!d.timeline) return alert(t('alert.invalid_data'));
+                await StorageManager.processPlayData(d, d.name || 'Shared'); PopupManager.showSuccess(t('popup.loaded'));
+            } catch (e) { alert(t('alert.load_error')); }
+        }
+    };
+
+    // ─── EXPORT ────────────────────────────────────────────────────────────────
+    const ExportManager = {
+        async drawPitch(ctx) {
+            ctx.clearRect(0, 0, WIDTH, HEIGHT); ctx.fillStyle = '#137a46'; ctx.fillRect(0, 0, WIDTH, HEIGHT);
+            const svg = dom.board.querySelector('.lines').cloneNode(true), dr = dom.draw.cloneNode(true);
+            while (dr.firstChild) svg.appendChild(dr.firstChild);
+            const defs = dom.draw.querySelector('defs'); if (defs) svg.prepend(defs.cloneNode(true));
+            const ser = new XMLSerializer().serializeToString(svg), img = new Image();
+            await new Promise(r => { img.onload = () => { ctx.drawImage(img, 0, 0); r(); }; img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(ser); });
+            if (appState.teamLogoDataUrl) { const li = new Image(); await new Promise(r => { li.onload = () => { ctx.save(); ctx.globalAlpha = 0.22; ctx.drawImage(li, WIDTH/2-110, HEIGHT/2-110, 220, 220); ctx.restore(); r(); }; li.src = appState.teamLogoDataUrl; }); }
+        },
+        drawPlayer(ctx, p) {
+            ctx.save(); ctx.translate(p.x, p.y); ctx.beginPath(); ctx.arc(0, 0, 20, 0, Math.PI * 2);
+            ctx.fillStyle = p.team === 'blue' ? appState.teamColors.blue : appState.teamColors.red;
+            ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = '#fff'; ctx.stroke();
+            ctx.fillStyle = '#fff'; ctx.font = 'bold 14px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(p.number, 0, 1); ctx.restore();
+        },
+        drawBall(ctx, b) {
+            ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(-15 * Math.PI / 180); ctx.beginPath(); ctx.ellipse(0, 0, 25, 15, 0, 0, Math.PI * 2);
+            ctx.fillStyle = '#ffd400'; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = '#fff'; ctx.stroke(); ctx.restore();
+        },
+        async renderFrameToCanvas(f) { if (!dom.ctx) return; await this.drawPitch(dom.ctx); f.players.forEach(p => this.drawPlayer(dom.ctx, p)); this.drawBall(dom.ctx, f.ball); },
+        setupExportUI() {
+            dom.exportJpgBtn.addEventListener('click', async () => {
+                if (!dom.exportCanvas) return;
+                await this.renderFrameToCanvas({ players: [...dom.playersLayer.children].map(el => ({ team: el.dataset.team, number: +el.dataset.number, x: parseFloat(el.style.left), y: parseFloat(el.style.top) })), ball: { x: parseFloat(dom.ball.style.left) || WIDTH/2, y: parseFloat(dom.ball.style.top) || HEIGHT/2 } });
+                const a = document.createElement('a'); a.href = dom.exportCanvas.toDataURL('image/jpeg', 0.95); a.download = 'board.jpg'; document.body.appendChild(a); a.click(); a.remove();
+            });
+        }
+    };
+
+    // ─── UI ────────────────────────────────────────────────────────────────────
+    const UIManager = {
+        initAccordion() {
+            document.querySelectorAll('.group-header').forEach(h => {
+                h.addEventListener('click', () => { const g = h.parentElement, c = g.querySelector('.group-content'); g.classList.toggle('closed'); c.classList.toggle('collapsed'); });
+            });
+        },
+        refreshToggleLabelsText() {
+            if (!dom.toggleLabelsBtn) return;
+            const show = dom.toggleLabelsBtn.classList.contains('active');
+            dom.toggleLabelsBtn.textContent = show ? t('controls.hide_labels') : t('controls.show_labels');
+        },
+        applyReadOnlyMode() {
+            [dom.recordStepBtn, dom.autoRecordChk, dom.clearTimelineBtn, dom.exportTimelineBtn, dom.importTimelineBtn, dom.clearAllBtn, dom.clearArrowsBtn, dom.undoGenericBtn, dom.savePlayBtn, dom.deletePlayBtn, dom.duplicatePlayBtn, dom.addPlayerBtn, dom.resetBtn, dom.sharePlayBtn].forEach(el => { if (el) el.disabled = true; });
+            if (dom.frameNote) dom.frameNote.readOnly = true;
+        },
+        setupEventListeners() {
+            this.initAccordion();
+            dom.btnLogin.addEventListener('click', () => AuthManager.login());
+            dom.btnRegister.addEventListener('click', () => AuthManager.registerWithEmail());
+            dom.btnGoogle.addEventListener('click', () => AuthManager.loginWithGoogle());
+            dom.loginPassword.addEventListener('keypress', (e) => { if (e.key === 'Enter') AuthManager.login(); });
+            dom.btnAuthAction.addEventListener('click', () => AuthManager.logout());
+            window.addEventListener('resize', () => {
+                LayoutManager.fitBoard();
+                if (window.innerWidth <= 900 && dom.mainApp.style.display !== 'none') dom.menuBtn.style.display = 'grid';
+                else dom.menuBtn.style.display = 'none';
+            });
+            dom.verticalFieldChk.addEventListener('change', () => { appState.layout.forceVertical = dom.verticalFieldChk.checked; LayoutManager.fitBoard(); });
+            dom.menuBtn.addEventListener('click', () => { dom.sidebar.classList.add('open'); dom.scrim.classList.add('show'); });
+            const closeM = () => { dom.sidebar.classList.remove('open'); dom.scrim.classList.remove('show'); };
+            dom.closeMenuBtn.addEventListener('click', closeM); dom.scrim.addEventListener('click', closeM);
+            dom.addPlayerBtn.addEventListener('click', () => UnitsManager.addPlayer());
+            dom.resetBtn.addEventListener('click', () => { UnitsManager.createPlayers(); UnitsManager.placeBall(); DrawManager.clearDraw(); StorageManager.savePositions(); StorageManager.saveBall(); });
+            dom.snapToggle.addEventListener('change', () => LayoutManager.renderGrid());
+            dom.toggleLabelsBtn.classList.add('active');
+            UIManager.refreshToggleLabelsText();
+            dom.toggleLabelsBtn.addEventListener('click', (e) => {
+                e.target.classList.toggle('active');
+                const show = e.target.classList.contains('active');
+                [...dom.playersLayer.children].forEach(el => el.style.fontSize = show ? 'var(--player-font)' : '0');
+                UIManager.refreshToggleLabelsText();
+            });
+            dom.toolSelectBtn.addEventListener('click', () => ToolManager.setTool('select'));
+            dom.toolArrowsBtn.addEventListener('click', () => ToolManager.setTool('arrows'));
+            dom.toolPenBtn.addEventListener('click', () => ToolManager.setTool('pen'));
+            dom.undoGenericBtn.addEventListener('click', () => DrawManager.undoLast());
+            dom.clearArrowsBtn.addEventListener('click', () => DrawManager.clearArrows());
+            dom.clearAllBtn.addEventListener('click', () => { if (confirm('Clear?')) DrawManager.clearDraw(); });
+            dom.savePlayBtn.addEventListener('click', () => StorageManager.savePlay());
+            dom.btnLoadPlay.addEventListener('click', () => { if (dom.loadPlaySel.value) StorageManager.loadPlay(dom.loadPlaySel.value); });
+            dom.deletePlayBtn.addEventListener('click', () => StorageManager.deletePlay());
+            dom.duplicatePlayBtn.addEventListener('click', () => StorageManager.duplicatePlay());
+            dom.recordStepBtn.addEventListener('click', () => TimelineManager.recordFrame());
+            dom.scrubber.addEventListener('input', TimelineManager.handleScrubberChange);
+            dom.prevFrameBtn.addEventListener('click', () => TimelineManager.loadFrame(Math.max(0, appState.playIndex - 1)));
+            dom.nextFrameBtn.addEventListener('click', () => TimelineManager.loadFrame(Math.min(appState.timeline.length - 1, appState.playIndex + 1)));
+            dom.playBtn.addEventListener('click', () => TimelineManager.startPlay());
+            dom.pauseBtn.addEventListener('click', () => TimelineManager.pausePlay());
+            dom.stopBtn.addEventListener('click', () => TimelineManager.stopPlay());
+            dom.clearTimelineBtn.addEventListener('click', () => TimelineManager.clearTimeline());
+            dom.exportTimelineBtn.addEventListener('click', () => StorageManager.exportTimeline());
+            dom.importTimelineBtn.addEventListener('click', () => StorageManager.importTimeline());
+            dom.duplicateFrameBtn.addEventListener('click', () => TimelineManager.duplicateFrame());
+            dom.speedSlowBtn.addEventListener('click', () => { dom.speedInput.value = 1200; appState.segmentDuration = 1200; });
+            dom.speedMediumBtn.addEventListener('click', () => { dom.speedInput.value = 800; appState.segmentDuration = 800; });
+            dom.speedFastBtn.addEventListener('click', () => { dom.speedInput.value = 400; appState.segmentDuration = 400; });
+            if (dom.frameNote) dom.frameNote.addEventListener('input', () => {
+                const f = appState.timeline[appState.playIndex];
+                if (f) { f.note = sanitizeInput(dom.frameNote.value || ''); dom.frameNote.value = f.note; StorageManager.saveTimeline(); }
+            });
+            dom.sharePlayBtn.addEventListener('click', () => StorageManager.createShareLink());
+            if (window.innerWidth <= 900) { dom.verticalFieldChk.checked = true; appState.layout.forceVertical = true; }
+            ExportManager.setupExportUI();
+            this.setupHotkeys();
+        },
+        setupHotkeys() {
+            window.addEventListener('keydown', (e) => {
+                const tag = e.target.tagName.toLowerCase(); if (tag === 'input' || tag === 'textarea') return;
+                if (e.code === 'Space') { e.preventDefault(); !appState.playing ? TimelineManager.startPlay() : (!appState.paused ? TimelineManager.pausePlay() : (appState.paused = false, cancelAnimationFrame(appState.rafId), appState.rafId = requestAnimationFrame(t => TimelineManager.play(t)))); }
+                if (e.key === 'ArrowLeft') { e.preventDefault(); TimelineManager.loadFrame(Math.max(0, appState.playIndex - 1)); }
+                if (e.key === 'ArrowRight') { e.preventDefault(); TimelineManager.loadFrame(Math.min(appState.timeline.length - 1, appState.playIndex + 1)); }
+                if (e.key === '1') ToolManager.setTool('select');
+                if (e.key === '2') ToolManager.setTool('arrows');
+                if (e.key === '3') ToolManager.setTool('pen');
+            });
+        }
+    };
+
+    // ─── SHARED VIEW ───────────────────────────────────────────────────────────
+    function getSharedIdFromUrl() { return new URLSearchParams(window.location.search).get('shared'); }
+
+    async function initSharedView(sharedId) {
+        if (!app) app = initializeApp(firebaseConfig);
+        if (!db) db = getFirestore(app);
+        appState.isSharedView = true;
+        appState.readOnly = true;
+        AuthManager.showApp();
+        AuthManager.showStatus("🔗 Shared play (read-only)", "success");
+        AuthManager.updateFirebaseStatus(true);
+        UIManager.applyReadOnlyMode();
+        await StorageManager.loadSharedPlay(sharedId);
+        LayoutManager.renderGrid();
+        LayoutManager.fitBoard();
+    }
+
+    // ─── INIT ──────────────────────────────────────────────────────────────────
+    async function init() {
+        try {
+            const sharedId = getSharedIdFromUrl();
+            if (sharedId) {
+                await initSharedView(sharedId);
+                UIManager.setupEventListeners();
+                return;
+            }
+
+            await AuthManager.init();
+
+            if (isAuthorized && currentUser) {
+                LayoutManager.renderGrid();
+                ToolManager.setTool('select');
+                TeamVisualManager.init();
+                UnitsManager.createPlayers();
+                StorageManager.loadPositions();
+                StorageManager.loadArrows();
+                StorageManager.loadStrokes();
+                DrawManager.renderDraw();
+                UnitsManager.placeBall(WIDTH / 2, HEIGHT / 2);
+                StorageManager.loadBall();
+                StorageManager.loadTimeline();
+                if (!appState.timeline.length) { TimelineManager.recordFrame(); appState.playIndex = 0; TimelineManager.updateScrubber(); StorageManager.saveTimeline(); }
+                DrawManager.enableDrawing();
+                UnitsManager.enableDragBall(() => { StorageManager.saveBall(); if (dom.autoRecordChk.checked) TimelineManager.recordFrame(); });
+                StorageManager.updatePlaySelect();
+                LayoutManager.fitBoard();
+                InteractionManager.enableSelectionBox();
+            } else {
+                TeamVisualManager.init();
+            }
+
+            UIManager.setupEventListeners();
+        } catch (e) {
+            console.error('Init error', e);
+        }
+    }
+
+    init();
+
+    const ro = new ResizeObserver(entries => { for (const en of entries) if (en.contentRect.width > 0) LayoutManager.fitBoard(); });
+    ro.observe(document.getElementById('boardViewport'));
+</script>
+</body>
+</html>
